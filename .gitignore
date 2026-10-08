@@ -1,0 +1,9 @@
+node_modules
+lib
+.env
+*.log
+.DS_Store
+
+# Local notes never belong in this public repo
+*.local.md
+notes/
