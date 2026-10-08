@@ -20,8 +20,10 @@ const PAGE = 1000
 const MAX_PAGES = Number(process.env.MAX_PAGES || 1_000_000)
 
 interface EntitySpec {
-  /** The plural query field. */
+  /** The plural query field on the subgraph. */
   field: string
+  /** The plural query field on the squid, when the entity was renamed. */
+  squidField?: string
   selection: string
 }
 
@@ -57,6 +59,8 @@ const SPECS: Record<string, EntitySpec[]> = {
     { field: 'rentables', selection: 'id' },
     { field: 'rentalsContracts', selection: 'id fee' },
     { field: 'analyticsDayDatas', selection: 'id date rentals volume lessorEarnings feeCollectorEarnings' },
+    { field: 'analyticsTotalDatas', selection: 'id rentals volume lessorEarnings feeCollectorEarnings' },
+    { field: 'counts', squidField: 'rentalsCounts', selection: 'id value' },
   ],
   'third-party': [
     {
@@ -67,6 +71,10 @@ const SPECS: Record<string, EntitySpec[]> = {
     { field: 'receipts', selection: 'id qty signer createdAt curation { id } thirdParty { id }' },
     { field: 'curations', selection: 'id qty' },
     { field: 'registryDatas', selection: 'id aggregatorAddress' },
+    { field: 'metadata_collection', selection: 'id type thirdParty { id }' },
+    { field: 'thirdPartyMetadata_collection', selection: 'id name description contracts { id network address }' },
+    { field: 'linkedContracts_collection', selection: 'id network address' },
+    { field: 'counts', squidField: 'thirdPartyCounts', selection: 'id thirdPartyTotal receiptTotal curationTotal' },
   ],
 }
 
@@ -95,8 +103,9 @@ function normalize(value: any): any {
   return value
 }
 
-async function compareEntity(spec: EntitySpec): Promise<{ checked: number; differences: string[] }> {
+async function compareEntity(spec: EntitySpec): Promise<{ checked: number; differences: string[]; ids: Set<string> }> {
   const differences: string[] = []
+  const ids = new Set<string>()
   let checked = 0
   let lastId = ''
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -109,12 +118,14 @@ async function compareEntity(spec: EntitySpec): Promise<{ checked: number; diffe
     if (rows.length === 0) break
     lastId = rows[rows.length - 1].id
 
-    const ids = JSON.stringify(rows.map((r) => r.id))
-    const squid = await gql(SQUID_URL, `{ rows: ${spec.field}(where: { id_in: ${ids} }, first: ${PAGE}) { ${spec.selection} } }`)
+    const pageIds = JSON.stringify(rows.map((r) => r.id))
+    const squidField = spec.squidField ?? spec.field
+    const squid = await gql(SQUID_URL, `{ rows: ${squidField}(where: { id_in: ${pageIds} }, first: ${PAGE}) { ${spec.selection} } }`)
     const byId = new Map<string, any>(squid.rows.map((r: any) => [r.id, r]))
 
     for (const row of rows) {
       checked++
+      ids.add(row.id)
       const mine = byId.get(row.id)
       if (!mine) {
         differences.push(`${spec.field} ${row.id}: missing in squid`)
@@ -126,33 +137,39 @@ async function compareEntity(spec: EntitySpec): Promise<{ checked: number; diffe
     }
     if (rows.length < PAGE) break
   }
-  return { checked, differences }
+  return { checked, differences, ids }
 }
 
-async function countSquidOnly(field: string, expected: number): Promise<number> {
-  // The squid's own row count, to catch rows the subgraph does not have.
-  let count = 0
-  let offset = 0
+/** Ids the squid has and the subgraph does not, walked with the same keyset as the subgraph side. */
+async function squidOnlyIds(spec: EntitySpec, subgraphIds: Set<string>): Promise<string[]> {
+  const extra: string[] = []
+  let lastId = ''
   for (;;) {
-    const data = await gql(SQUID_URL, `{ rows: ${field}(first: ${PAGE}, skip: ${offset}, orderBy: id) { id } }`)
-    count += data.rows.length
-    if (data.rows.length < PAGE) break
-    offset += PAGE
+    const where = lastId ? `where: { id_gt: ${JSON.stringify(lastId)} }, ` : ''
+    const data = await gql(SQUID_URL, `{ rows: ${spec.squidField ?? spec.field}(${where}first: ${PAGE}, orderBy: id) { id } }`)
+    const rows: { id: string }[] = data.rows
+    for (const row of rows) if (!subgraphIds.has(row.id)) extra.push(row.id)
+    if (rows.length < PAGE) break
+    lastId = rows[rows.length - 1].id
   }
-  return count - expected
+  return extra
 }
 
 async function main() {
   if (!Number.isInteger(BLOCK)) throw new Error('BLOCK is required')
+  if (!Number.isInteger(MAX_PAGES) || MAX_PAGES < 1) throw new Error('MAX_PAGES must be a positive integer')
   let failures = 0
   const specs = SPECS[process.env.ENTITIES || 'land']
   if (!specs) throw new Error(`ENTITIES must be one of ${Object.keys(SPECS).join(', ')}`)
+  const complete = !process.env.MAX_PAGES
   for (const spec of specs) {
-    const { checked, differences } = await compareEntity(spec)
-    const extra = MAX_PAGES === 1_000_000 ? await countSquidOnly(spec.field, checked) : 0
-    console.log(`${spec.field}: ${checked} checked, ${differences.length} different, ${extra} only in squid`)
+    const { checked, differences, ids } = await compareEntity(spec)
+    // Only a complete walk of the subgraph can tell which squid rows it lacks.
+    const extra = complete ? await squidOnlyIds(spec, ids) : []
+    console.log(`${spec.field}: ${checked} checked, ${differences.length} different, ${extra.length} only in squid`)
     for (const d of differences.slice(0, 10)) console.log(d)
-    failures += differences.length + Math.abs(extra)
+    for (const id of extra.slice(0, 10)) console.log(`${spec.field} ${id}: only in squid`)
+    failures += differences.length + extra.length
   }
   process.exit(failures === 0 ? 0 : 1)
 }

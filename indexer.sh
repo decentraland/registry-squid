@@ -3,9 +3,15 @@
 # Starts the squid on its own schema, one schema per (ECS service, commit).
 #
 # A deployment of a commit this service has run before resumes that schema. A new commit gets a new
-# schema and a new database user, registered in public.indexers, and indexes from scratch; a
-# promotion later renames the schema to its stable name. Reader roles come from READER_ROLES
-# (space-separated) so this script carries no consumer list of its own.
+# schema and a new database user, registered in public.indexers, and indexes from scratch. Reader
+# roles come from READER_ROLES (space-separated) so this script carries no consumer list of its own.
+#
+# Promotion (done by the squid management server, not here) renames the schema to its stable name,
+# points this user's search_path at the new name with ALTER USER ... SET search_path, and leaves the
+# public.indexers row untouched. This script relies on all three:
+#   - the data tables resolve through the user's search_path, which promotion keeps current;
+#   - SQUID_SCHEMA is the registered name, which never changes, so the processors' state schemas
+#     (<chain>_processor_$SQUID_SCHEMA) keep their names and a restart after promotion resumes them.
 #
 # Every step fails closed: starting on a schema nobody registered, or creating a fresh schema
 # because a lookup failed, would reindex from scratch on every restart.
@@ -40,9 +46,20 @@ fi
 
 echo "Service name: $SERVICE_NAME"
 
-EXISTING_INDEXER=$(psql -t -A -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "$DB_NAME" --host "$DB_HOST" --port "$DB_PORT" <<-EOSQL
+# The deployment's user gets a fresh random password on every start. It never shares the admin
+# password, nothing has to store it, and it is hex, so it needs no escaping in SQL or in a URL.
+DEPLOYMENT_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+
+# Values go to psql as variables (:'name' quotes a literal), never spliced into the SQL text.
+psql_admin() {
+  psql -t -A -v ON_ERROR_STOP=1 \
+    -v service="$SERVICE_NAME" -v commit="$COMMIT_HASH" -v password="$DEPLOYMENT_PASSWORD" \
+    --username "$DB_USER" --dbname "$DB_NAME" --host "$DB_HOST" --port "$DB_PORT" "$@"
+}
+
+EXISTING_INDEXER=$(psql_admin <<-EOSQL
   SELECT schema, db_user FROM public.indexers
-  WHERE service = '$SERVICE_NAME' AND commit_hash = '$COMMIT_HASH'
+  WHERE service = :'service' AND commit_hash = :'commit'
   ORDER BY created_at DESC LIMIT 1;
 EOSQL
 )
@@ -51,43 +68,46 @@ if [ -n "$EXISTING_INDEXER" ]; then
   NEW_SCHEMA_NAME=$(echo "$EXISTING_INDEXER" | cut -d'|' -f1)
   NEW_DB_USER=$(echo "$EXISTING_INDEXER" | cut -d'|' -f2)
   echo "Resuming schema $NEW_SCHEMA_NAME as $NEW_DB_USER"
+
+  psql_admin <<-EOSQL
+    ALTER USER "$NEW_DB_USER" WITH PASSWORD :'password';
+EOSQL
 else
   echo "Creating schema $NEW_SCHEMA_NAME and user $NEW_DB_USER"
 
   GRANTS=""
   for ROLE in $READER_ROLES; do
     GRANTS="$GRANTS
-    GRANT USAGE ON SCHEMA $NEW_SCHEMA_NAME TO $ROLE;
-    ALTER DEFAULT PRIVILEGES FOR ROLE $NEW_DB_USER IN SCHEMA $NEW_SCHEMA_NAME GRANT SELECT ON TABLES TO $ROLE;"
+    GRANT USAGE ON SCHEMA $NEW_SCHEMA_NAME TO \"$ROLE\";
+    ALTER DEFAULT PRIVILEGES FOR ROLE $NEW_DB_USER IN SCHEMA $NEW_SCHEMA_NAME GRANT SELECT ON TABLES TO \"$ROLE\";"
   done
 
   # One transaction: a failed grant (a misspelled reader role, say) rolls back the schema and the
   # user too, instead of leaving them behind unregistered.
-  psql -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "$DB_NAME" --host "$DB_HOST" --port "$DB_PORT" <<-EOSQL
+  psql_admin <<-EOSQL
     BEGIN;
     CREATE SCHEMA $NEW_SCHEMA_NAME;
-    CREATE USER $NEW_DB_USER WITH PASSWORD '$DB_PASSWORD';
+    CREATE USER $NEW_DB_USER WITH PASSWORD :'password';
     GRANT ALL PRIVILEGES ON SCHEMA $NEW_SCHEMA_NAME TO $NEW_DB_USER;
-    GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $NEW_DB_USER;
+    GRANT ALL PRIVILEGES ON DATABASE "$DB_NAME" TO $NEW_DB_USER;
     ALTER USER $NEW_DB_USER SET search_path TO $NEW_SCHEMA_NAME;
-    GRANT $NEW_DB_USER TO $DB_USER;
+    GRANT $NEW_DB_USER TO "$DB_USER";
     $GRANTS
     INSERT INTO public.indexers (service, schema, db_user, created_at, commit_hash)
-    VALUES ('$SERVICE_NAME', '$NEW_SCHEMA_NAME', '$NEW_DB_USER', NOW(), '$COMMIT_HASH');
+    VALUES (:'service', '$NEW_SCHEMA_NAME', '$NEW_DB_USER', NOW(), :'commit');
     COMMIT;
 EOSQL
 fi
 
 unset PGPASSWORD
 
-export DB_URL=postgresql://$NEW_DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME
-# SQUID_SCHEMA, never DB_SCHEMA: typeorm-config would pin search_path per connection, and the pin
-# goes stale when the promotion renames this schema. The role's default search_path stays
-# authoritative instead.
+export DB_URL=postgresql://$NEW_DB_USER:$DEPLOYMENT_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME
+# SQUID_SCHEMA, never DB_SCHEMA: typeorm-config would pin search_path per connection to the name
+# that promotion retires. See the promotion contract at the top of this file.
 export SQUID_SCHEMA=$NEW_SCHEMA_NAME
 unset DB_SCHEMA
 export DB_USER=$NEW_DB_USER
-export DB_PASS=$DB_PASSWORD
+export DB_PASS=$DEPLOYMENT_PASSWORD
 
 echo "Starting squid services on $SQUID_SCHEMA..."
 exec sqd run:registry --node-options="${NODE_OPTIONS:-}"
