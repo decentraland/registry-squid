@@ -1,0 +1,125 @@
+# LAND and Estate rentals: the Rentals contract on Ethereum, plus the UpdateOperator events of every
+# contract it has rented from.
+#
+# Entity names, fields and id formats follow the rentals-graph subgraph, so its queries run
+# unchanged. Fields marked "squid-only" are additions.
+#
+# Id formats:
+#   Rental                 "<contractAddress>:<tokenId>:<rentalIndex>"
+#   RentalAsset            "<contractAddress>-<tokenId>"
+#   IndexesUpdate*History  a global counter, as a decimal string
+#   AnalyticsDayData       the UTC day number (timestamp / 86400)
+
+type Rental @entity {
+  id: ID!
+  contractAddress: String! @index
+  tokenId: BigInt! @index
+  lessor: String! @index
+  tenant: String! @index
+  operator: String!
+  rentalDays: BigInt!
+  startedAt: BigInt! @index
+  endsAt: BigInt! @index
+  updatedAt: BigInt! @index
+  pricePerDay: BigInt!
+  sender: String!
+  ownerHasClaimedAsset: Boolean!
+  claimedAt: BigInt
+  isExtension: Boolean!
+  isActive: Boolean! @index
+  signature: String! @index
+  rentalContractAddress: String!
+  # squid-only: the AssetRented event that created the rental.
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+# The subgraph names this entity `Count`. It is renamed because the third-party registry has a
+# `Count` of its own and one squid has one GraphQL namespace. No known consumer reads it.
+type RentalsCount @entity {
+  id: ID!
+  value: BigInt!
+}
+
+enum IndexUpdateType {
+  CONTRACT
+  SIGNER
+  ASSET
+}
+
+enum IndexUpdateEventType {
+  RENT
+  CANCEL
+}
+
+type IndexesUpdateHistory @entity {
+  id: ID!
+  type: IndexUpdateType!
+  date: BigInt! @index
+  sender: String!
+  contractUpdate: IndexesUpdateContractHistory
+  # The misspelling is the subgraph's; signatures-server queries this name.
+  singerUpdate: IndexesUpdateSignerHistory
+  assetUpdate: IndexesUpdateAssetHistory
+  # squid-only
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type IndexesUpdateContractHistory @entity {
+  id: ID!
+  newIndex: BigInt!
+  contractAddress: Bytes!
+}
+
+type IndexesUpdateSignerHistory @entity {
+  id: ID!
+  newIndex: BigInt!
+  signer: String! @index
+}
+
+type IndexesUpdateAssetHistory @entity {
+  id: ID!
+  newIndex: BigInt!
+  signer: String! @index
+  tokenId: BigInt!
+  contractAddress: String!
+  type: IndexUpdateEventType!
+}
+
+type Rentable @entity {
+  id: ID!
+}
+
+type RentalAsset @entity {
+  id: ID!
+  contractAddress: Bytes!
+  tokenId: BigInt!
+  lessor: Bytes @index
+  isClaimed: Boolean!
+  claimedAt: BigInt
+}
+
+type RentalsContract @entity {
+  id: ID!
+  fee: BigInt!
+}
+
+type AnalyticsTotalData @entity {
+  id: ID!
+  rentals: Int!
+  volume: BigInt!
+  lessorEarnings: BigInt!
+  feeCollectorEarnings: BigInt!
+}
+
+type AnalyticsDayData @entity {
+  id: ID!
+  date: Int!
+  rentals: Int!
+  volume: BigInt!
+  lessorEarnings: BigInt!
+  feeCollectorEarnings: BigInt!
+}

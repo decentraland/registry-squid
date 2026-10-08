@@ -1,0 +1,60 @@
+{
+  "$schema": "https://cdn.subsquid.io/schemas/commands.json",
+  "commands": {
+    "build": {
+      "description": "Build the squid project",
+      "cmd": ["npx", "tsc"]
+    },
+    "codegen": {
+      "description": "Generate TypeORM entities from the schema directory",
+      "cmd": ["squid-typeorm-codegen"]
+    },
+    "typegen": {
+      "description": "Generate data access classes for the ABIs",
+      "cmd": ["squid-evm-typegen", "./src/abi", { "glob": "./abi/*.json" }]
+    },
+    "migration:apply": {
+      "description": "Apply the database migrations",
+      "cmd": ["squid-typeorm-migration", "apply"]
+    },
+    "migration:generate": {
+      "description": "Generate a migration from the current schema",
+      "cmd": ["squid-typeorm-migration", "generate"]
+    },
+    "process:ethereum": {
+      "description": "Run the Ethereum processor (LAND permissions and rentals)",
+      "cmd": ["node", "--require=dotenv/config", "lib/ethereum/main.js"]
+    },
+    "process:polygon": {
+      "description": "Run the Polygon processor (third-party registry)",
+      "cmd": ["node", "--require=dotenv/config", "lib/polygon/main.js"]
+    },
+    "process:prod:ethereum": {
+      "hidden": true,
+      "cmd": ["node", "lib/ethereum/main.js"]
+    },
+    "process:prod:polygon": {
+      "hidden": true,
+      "cmd": ["node", "lib/polygon/main.js"]
+    },
+    "serve": {
+      "description": "Start the GraphQL API with The Graph's query dialect",
+      "cmd": ["squid-graphql-server", "--dialect", "thegraph"]
+    },
+    "serve:prod": {
+      "hidden": true,
+      "cmd": [
+        "squid-graphql-server",
+        "--dumb-cache", "in-memory",
+        "--dumb-cache-ttl", "2000",
+        "--dumb-cache-size", "100",
+        "--dumb-cache-max-age", "2000",
+        "--dialect", "thegraph"
+      ]
+    },
+    "run:registry": {
+      "description": "Run every service in squid.yaml",
+      "cmd": ["sqd", "run", ".", "-r", "100000"]
+    }
+  }
+}

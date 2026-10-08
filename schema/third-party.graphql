@@ -1,0 +1,102 @@
+# Third-party (linked wearables) registry: ThirdPartyRegistry on Polygon.
+#
+# Entity names, fields and id formats follow the tpr-graph subgraph, so its queries run unchanged.
+# Fields marked "squid-only" are additions.
+
+type ThirdParty @entity {
+  # The third party's URN.
+  id: ID!
+  managers: [String!]!
+  rawMetadata: String!
+  resolver: String
+  isApproved: Boolean @index
+  maxItems: BigInt!
+  metadata: Metadata!
+  root: String!
+  consumedSlots: BigInt!
+  isProgrammatic: Boolean!
+  searchName: String
+  searchDescription: String
+  searchText: String
+  # squid-only: every root and approval change, so "the root at block N" needs no time travel.
+  rootHistory: [ThirdPartyRootHistory!] @derivedFrom(field: "thirdParty")
+}
+
+# squid-only. One row per ThirdPartyReviewedWithRoot / ThirdPartyReviewed event, carrying the root
+# and approval that were in force after it. Id: "<block>-<logIndex>".
+type ThirdPartyRootHistory @entity @index(fields: ["thirdParty", "blockNumber"]) {
+  id: ID!
+  thirdParty: ThirdParty!
+  root: String!
+  isApproved: Boolean!
+  eventName: String!
+  blockNumber: Int!
+  logIndex: Int!
+  timestamp: BigInt!
+  transactionHash: String!
+}
+
+type Curation @entity {
+  # The curator's address.
+  id: ID!
+  qty: BigInt!
+  receipts: [Receipt!] @derivedFrom(field: "curation")
+}
+
+type Receipt @entity {
+  # The message hash.
+  id: ID!
+  thirdParty: ThirdParty!
+  curation: Curation!
+  qty: BigInt!
+  signer: String!
+  createdAt: BigInt!
+}
+
+enum MetadataType {
+  undefined
+  third_party_v1
+}
+
+type Metadata @entity {
+  id: ID!
+  type: MetadataType!
+  thirdParty: ThirdPartyMetadata
+}
+
+type LinkedContracts @entity {
+  # "<network>-<address>", lowercase.
+  id: ID!
+  network: String!
+  address: String!
+}
+
+# The subgraph stores ThirdPartyMetadata.contracts as references to LinkedContracts. A squid cannot
+# store a list of references, so the same three fields are kept inline, sorted by id as graph-node
+# returns them; `contracts { id network address }` reads the same either way.
+type LinkedContract {
+  id: String!
+  network: String!
+  address: String!
+}
+
+type RegistryData @entity {
+  id: ID!
+  aggregatorAddress: String!
+}
+
+type ThirdPartyMetadata @entity {
+  id: ID!
+  name: String!
+  description: String!
+  contracts: [LinkedContract!]
+}
+
+# The subgraph names this entity `Count`; renamed because the rentals subgraph has one too. No known
+# consumer reads it.
+type ThirdPartyCount @entity {
+  id: ID!
+  thirdPartyTotal: BigInt!
+  receiptTotal: BigInt!
+  curationTotal: BigInt!
+}
