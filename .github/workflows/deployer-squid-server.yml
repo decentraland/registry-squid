@@ -28,7 +28,7 @@ on:
         required: false
         default: false
         type: boolean
-        description: "FORCE: deploy even if the target slot is LIVE. Only for a schema-less fix onto a broken live slot — see the guard step."
+        description: "FORCE: deploy even if the target slot is LIVE. Only to restart the live slot on the commit it already runs — see the guard step."
 
 jobs:
   deployment:
@@ -62,14 +62,15 @@ jobs:
           # failures inside variable assignments — that pattern silently lets a failed
           # liveness check fall through to a successful deploy.
           #
-          # `force` downgrades every refusal below to a warning. It exists for ONE situation: the live
-          # slot is broken — a crash-looping processor indexes nothing — and the fix has to land on the
-          # schema it already has, because a normal deploy provisions a brand-new schema (indexer.sh keys
-          # it by service + commit hash) and reindexes from the contracts' first block, which takes hours.
+          # `force` downgrades every refusal below to a warning. It exists for ONE situation: restarting
+          # the live slot on the commit it already runs, for instance to pick up a changed SSM parameter.
+          # indexer.sh keys a deployment's schema by service + commit hash, so the same commit resumes the
+          # schema the API is serving.
           #
-          # It is only safe when the deploy carries NO schema change: no new entry under db/migrations and
-          # no edit under schema/. Migrations are applied to the schema the API is serving right now, so a
-          # forced deploy that carries one changes production data under live traffic.
+          # It cannot land a fix on the live schema. An image built from another commit always gets a new
+          # schema and reindexes from the contracts' first block, while the API keeps reading the old one,
+          # which nothing updates any more. A fix goes to the other slot, and is promoted once it has
+          # caught up.
 
           set -euo pipefail
 
