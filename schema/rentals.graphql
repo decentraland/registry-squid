@@ -27,7 +27,10 @@ type Rental @entity {
   claimedAt: BigInt
   isExtension: Boolean!
   isActive: Boolean! @index
-  signature: String! @index
+  # Not a btree index: the lessor controls the signature (any length, through ERC-1271), and one
+  # over ~2.7 KB would exceed Postgres' btree row size, fail the upsert and stall the processor. A
+  # hash index (db/migrations/1791465864101-RentalSignatureHash.js) serves lookups by signature.
+  signature: String!
   rentalContractAddress: String!
   # squid-only: the AssetRented event that created the rental.
   blockNumber: Int!

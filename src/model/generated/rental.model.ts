@@ -62,7 +62,6 @@ export class Rental {
     @BooleanColumn_({nullable: false})
     isActive!: boolean
 
-    @Index_("idx_rental_signature_cefde5b9")
     @StringColumn_({nullable: false})
     signature!: string
 
