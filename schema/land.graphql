@@ -1,0 +1,156 @@
+# LAND permissions: LANDRegistry and EstateRegistry on Ethereum.
+#
+# Entity names, field names and id formats follow the LAND-permissions-graph subgraph, so the
+# queries its consumers send today run unchanged against this squid's GraphQL API
+# (`--dialect thegraph`). Fields marked "squid-only" are additions; GraphQL clients that do not
+# ask for them are unaffected.
+#
+# Id formats:
+#   Parcel          minimal hex of the token id: "0x1", "0xffff...fff6"
+#   Estate, Data    decimal token id for estates; the parcel's hex id for parcel data
+#   Wallet          lowercase address
+#   Authorization,
+#   Owner, Operator,
+#   UpdateOperator  "<block>-<logIndex>-<Type>"
+#   EstateHistory   "<block>-<logIndex>-<AddLand|RemoveLand>-<estateId>"
+
+type Parcel @entity @index(fields: ["x", "y"]) {
+  id: ID!
+  tokenId: BigInt! @index
+  x: BigInt!
+  y: BigInt!
+  owner: Wallet
+  owners: [Owner!] @derivedFrom(field: "parcel")
+  operators: [Operator!] @derivedFrom(field: "parcel")
+  operator: Bytes
+  updateOperator: Bytes @index
+  updateOperators: [UpdateOperator!] @derivedFrom(field: "parcel")
+  estate: Estate
+  estates: [EstateHistory!] @derivedFrom(field: "parcel")
+  data: Data @unique
+  updatedAt: BigInt
+}
+
+type Estate @entity {
+  id: ID!
+  owner: Wallet!
+  owners: [Owner!] @derivedFrom(field: "estate")
+  operators: [Operator!] @derivedFrom(field: "estate")
+  operator: Bytes
+  updateOperator: Bytes @index
+  updateOperators: [UpdateOperator!] @derivedFrom(field: "estate")
+  size: Int
+  # Stored as a list of parcel ids in the subgraph; derived from Parcel.estate here.
+  parcels: [Parcel!] @derivedFrom(field: "estate")
+  data: Data @unique
+  createdAt: BigInt
+  updatedAt: BigInt
+}
+
+type EstateHistory @entity {
+  id: ID!
+  # The subgraph calls this `_prevEstateId`; squid field names cannot start with "_".
+  # No known consumer reads it.
+  prevEstateId: String
+  estateId: String @index
+  parcel: Parcel!
+  createdAt: BigInt!
+  # squid-only: the event that produced the row, for "membership at block N" reads. The subgraph
+  # leaves estateId null on RemoveLand, which loses the estate the parcel left; estateTokenId is
+  # always the estate the event applies to.
+  estateTokenId: String! @index
+  eventName: String!
+  blockNumber: Int! @index
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type Authorization @entity @index(fields: ["owner", "type"]) {
+  id: ID!
+  type: String!
+  tokenAddress: Bytes!
+  owner: Wallet!
+  operator: Bytes! @index
+  isApproved: Boolean!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  # squid-only
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+# squid-only: the latest UpdateManager / ApprovalForAll per (tokenAddress, owner, operator, type).
+# Authorization is an event log; this is its current state, so "who can deploy" is one read.
+type AuthorizationState @entity @index(fields: ["owner", "type"]) {
+  # "<tokenAddress>-<owner>-<operator>-<type>"
+  id: ID!
+  type: String!
+  tokenAddress: Bytes!
+  owner: Wallet!
+  operator: Bytes! @index
+  isApproved: Boolean!
+  timestamp: BigInt!
+  blockNumber: Int!
+  logIndex: Int!
+}
+
+type Owner @entity {
+  id: ID!
+  address: Bytes
+  parcel: Parcel
+  estate: Estate
+  eventName: String!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  # squid-only
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type Operator @entity {
+  id: ID!
+  address: Bytes
+  parcel: Parcel
+  estate: Estate
+  eventName: String!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  # squid-only
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type UpdateOperator @entity {
+  id: ID!
+  address: Bytes
+  parcel: Parcel
+  estate: Estate
+  eventName: String!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  # squid-only
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type Data @entity {
+  id: ID!
+  # Stored references in the subgraph; derived from Parcel.data / Estate.data here.
+  parcel: Parcel @derivedFrom(field: "data")
+  estate: Estate @derivedFrom(field: "data")
+  version: String!
+  name: String
+  description: String
+  ipns: String
+}
+
+type Wallet @entity {
+  id: ID!
+  address: Bytes!
+  parcels: [Parcel!] @derivedFrom(field: "owner")
+  estates: [Estate!] @derivedFrom(field: "owner")
+}

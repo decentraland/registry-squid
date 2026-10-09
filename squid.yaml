@@ -1,0 +1,17 @@
+manifestVersion: subsquid.io/v0.1
+name: registry-squid
+version: 1
+description: "Decentraland LAND permissions, rentals and third-party registry"
+build:
+deploy:
+  addons:
+    postgres:
+  init:
+    cmd: ["sqd", "migration:apply"]
+  processor:
+    - name: ethereum-processor
+      cmd: ["sqd", "process:prod:ethereum"]
+    - name: polygon-processor
+      cmd: ["sqd", "process:prod:polygon"]
+  api:
+    cmd: ["sqd", "serve:prod"]
