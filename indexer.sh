@@ -13,6 +13,10 @@
 #   - SQUID_SCHEMA is the registered name, which never changes, so the processors' state schemas
 #     (<chain>_processor_$SQUID_SCHEMA) keep their names and a restart after promotion resumes them.
 #
+# The readers can read the state schemas too: each processor's height there is how a reader tells
+# whether the squid has indexed a block yet. This script creates them, owned by the deployment user,
+# so the grants are in place before the processors create their tables.
+#
 # Every step fails closed: starting on a schema nobody registered, or creating a fresh schema
 # because a lookup failed, would reindex from scratch on every restart.
 
@@ -82,11 +86,21 @@ else
   echo "Creating schema $NEW_SCHEMA_NAME and user $NEW_DB_USER"
   DEPLOYMENT_PASSWORD=$(deployment_password "$NEW_DB_USER")
 
+  # The processors' state schemas, as src/<chain>/main.ts names them.
+  STATE_SCHEMAS="ethereum_processor_$NEW_SCHEMA_NAME polygon_processor_$NEW_SCHEMA_NAME"
+  STATE=""
+  for SCHEMA in $STATE_SCHEMAS; do
+    STATE="$STATE
+    CREATE SCHEMA $SCHEMA AUTHORIZATION $NEW_DB_USER;"
+  done
+
   GRANTS=""
   for ROLE in $READER_ROLES; do
-    GRANTS="$GRANTS
-    GRANT USAGE ON SCHEMA $NEW_SCHEMA_NAME TO \"$ROLE\";
-    ALTER DEFAULT PRIVILEGES FOR ROLE $NEW_DB_USER IN SCHEMA $NEW_SCHEMA_NAME GRANT SELECT ON TABLES TO \"$ROLE\";"
+    for SCHEMA in $NEW_SCHEMA_NAME $STATE_SCHEMAS; do
+      GRANTS="$GRANTS
+    GRANT USAGE ON SCHEMA $SCHEMA TO \"$ROLE\";
+    ALTER DEFAULT PRIVILEGES FOR ROLE $NEW_DB_USER IN SCHEMA $SCHEMA GRANT SELECT ON TABLES TO \"$ROLE\";"
+    done
   done
 
   # One transaction: a failed grant (a misspelled reader role, say) rolls back the schema and the
@@ -99,6 +113,7 @@ else
     GRANT ALL PRIVILEGES ON DATABASE "$DB_NAME" TO $NEW_DB_USER;
     ALTER USER $NEW_DB_USER SET search_path TO $NEW_SCHEMA_NAME;
     GRANT $NEW_DB_USER TO "$DB_USER";
+    $STATE
     $GRANTS
     INSERT INTO public.indexers (service, schema, db_user, created_at, commit_hash)
     VALUES (:'service', '$NEW_SCHEMA_NAME', '$NEW_DB_USER', NOW(), :'commit');
