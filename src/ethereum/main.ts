@@ -46,6 +46,7 @@ const db = new TypeormDatabase({
   // Index the unfinalized tip and roll it back on reorgs, so permission changes show up seconds
   // after the transaction instead of after Ethereum finality (~13 minutes).
   supportHotBlocks: true,
+  // indexer.sh creates this schema, readable by READER_ROLES: keep the two names in step.
   stateSchema: `ethereum_processor_${schema}`,
 })
 

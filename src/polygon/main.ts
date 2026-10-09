@@ -25,6 +25,7 @@ const schema = process.env.SQUID_SCHEMA || 'local'
 const db = new TypeormDatabase({
   isolationLevel: 'READ COMMITTED',
   supportHotBlocks: true,
+  // indexer.sh creates this schema, readable by READER_ROLES: keep the two names in step.
   stateSchema: `polygon_processor_${schema}`,
 })
 
