@@ -46,9 +46,14 @@ fi
 
 echo "Service name: $SERVICE_NAME"
 
-# The deployment's user gets a fresh random password on every start. It never shares the admin
-# password, nothing has to store it, and it is hex, so it needs no escaping in SQL or in a URL.
-DEPLOYMENT_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+# Each deployment user has a password of its own, derived from the admin password and the user's
+# name: never the admin password itself, nothing has to store it, and the same on every start, so a
+# task that starts while the one it replaces still runs does not change the password under it. It is
+# hex, so it needs no escaping in SQL or in a URL.
+deployment_password() {
+  node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.DB_PASSWORD).update(process.argv[1]).digest("hex"))' "$1"
+}
+DEPLOYMENT_PASSWORD=
 
 # Values go to psql as variables (:'name' quotes a literal), never spliced into the SQL text.
 psql_admin() {
@@ -68,12 +73,14 @@ if [ -n "$EXISTING_INDEXER" ]; then
   NEW_SCHEMA_NAME=$(echo "$EXISTING_INDEXER" | cut -d'|' -f1)
   NEW_DB_USER=$(echo "$EXISTING_INDEXER" | cut -d'|' -f2)
   echo "Resuming schema $NEW_SCHEMA_NAME as $NEW_DB_USER"
+  DEPLOYMENT_PASSWORD=$(deployment_password "$NEW_DB_USER")
 
   psql_admin <<-EOSQL
     ALTER USER "$NEW_DB_USER" WITH PASSWORD :'password';
 EOSQL
 else
   echo "Creating schema $NEW_SCHEMA_NAME and user $NEW_DB_USER"
+  DEPLOYMENT_PASSWORD=$(deployment_password "$NEW_DB_USER")
 
   GRANTS=""
   for ROLE in $READER_ROLES; do

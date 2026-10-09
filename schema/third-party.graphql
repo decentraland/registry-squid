@@ -89,6 +89,8 @@ type ThirdPartyMetadata @entity {
   id: ID!
   name: String!
   description: String!
+  # Held inline, where the subgraph has a relation that graph-node pages (100 entries by default, and
+  # first/skip arguments). The whole list comes back instead; in October 2026 the longest holds 2.
   contracts: [LinkedContract!]
 }
 
