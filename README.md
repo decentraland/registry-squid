@@ -17,7 +17,7 @@ It replaces three subgraphs: [LAND-permissions-graph](https://github.com/decentr
 
 - **Same names, fields and id formats.** Entity names, field names and id formats follow those subgraphs. The GraphQL API runs with `--dialect thegraph`, so their queries keep working.
 - **Pass `first` and `orderBy`.** graph-node applies `first: 100` and sorts by `id` when a query leaves them out, at the top level and in nested lists. The squid applies neither: a query without `first` returns every row, and rows without `orderBy` come back in no particular order. Queries that already pass both behave the same.
-- **Ids in the same order.** graph-node sorts and compares ids byte by byte (C collation). Every id column here, and every column holding one, takes the C collation too (`db/migrations/*-IdCollation.js`), so `orderBy: id` and `id_gt` page exactly as on the subgraph, whatever the database's default collation.
+- **Text in the same order.** graph-node sorts and compares text byte by byte (C collation). Every text column here takes the C collation too (`db/migrations/*-TextCollation.js`), so `orderBy: id`, `id_gt` and any order or range over text page exactly as on the subgraph, whatever the database's default collation.
 - **Empty strings read null.** The subgraphs' generated setters store a nullable string set to `""` as `null`, so a LAND or estate whose metadata has an empty name, description or IPNS, or a third party with an empty name or description, reads `null` there. The squid stores them the same way.
 - **Additive fields.** Fields marked "squid-only" in `schema/` are additions; clients that do not ask for them are unaffected.
 - **Renamed fields and entities.** A few names change because a squid cannot express them:

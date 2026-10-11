@@ -3,7 +3,9 @@
 // Consumers read these views, never the entity tables, so the tables can change between squid
 // versions without breaking them. A breaking change ships as v2_* next to v1_*. The views live in
 // the squid's own schema, so a promotion that renames the schema carries them along. Addresses are
-// lowercase 0x-prefixed text; token ids are numeric.
+// lowercase 0x-prefixed text; token ids are numeric. Text read from the tables has the C collation
+// (see TextCollation): it sorts byte by byte, and a join with another table's text compares under C.
+// The addresses built here from bytes keep the default, and sort the same under either.
 //
 // Migrations run in timestamp order. A regenerated table migration gets a newer timestamp than this
 // file, so the views would be created before their tables: drop the views first in that migration,
