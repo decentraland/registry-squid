@@ -104,9 +104,13 @@ schema. Without `SQUID_ENABLED`, the image only serves the GraphQL API, over the
 `DB_SCHEMA` (the promoted one).
 
 The API (`serve:prod` in `commands.json`) shares its database with other services, so it bounds what
-one query can take from it: each SQL statement runs for at most 10 seconds (just over the 9 seconds
-the subgraph proxy in front of it waits before falling back), and a query asks for at most 100 root
-fields. It sets no `--max-response-size`: that limit is checked against an estimate that multiplies
+one request can take from it: each SQL statement runs for at most 10 seconds, and a request asks for
+at most 20 root fields (the Builder's land query, the heaviest client query known, asks for 10). The
+two multiply. A request runs one statement per root field, one after another on one connection, so
+it can hold that connection for up to 20 × 10 seconds, and nothing stops it when the subgraph proxy
+in front of it gives up at 9 seconds and falls back.
+
+It sets no `--max-response-size`: that limit is checked against an estimate that multiplies
 the `first` of every nested list, and the Builder's land query nests lists of 1000 three levels deep
 (`authorizations { owner { estates { parcels } } }`), which estimates in the billions of nodes
 however few rows it returns.
