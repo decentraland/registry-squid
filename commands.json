@@ -49,6 +49,8 @@
         "--dumb-cache-ttl", "2000",
         "--dumb-cache-size", "100",
         "--dumb-cache-max-age", "2000",
+        "--sql-statement-timeout", "10000",
+        "--max-root-fields", "20",
         "--dialect", "thegraph"
       ]
     },
