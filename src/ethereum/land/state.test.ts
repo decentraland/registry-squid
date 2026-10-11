@@ -68,6 +68,23 @@ test('parcel metadata merges like graph-node: a missing field keeps its old valu
   assert.equal(state.parcels.get(parcelId(tokenId))!.data?.id, parcelId(tokenId))
 })
 
+test('an empty metadata field reads null, as the subgraph stores it, while a missing one keeps its value', () => {
+  const state = new LandState(ESTATE)
+  const tokenId = encodeTokenId(3n, 4n)
+  apply(state, { ...meta(310), kind: 'ParcelTransfer', to: ALICE, tokenId })
+  apply(state, { ...meta(311), kind: 'ParcelUpdate', tokenId, data: '0,"Name","Description","ipns"' })
+  apply(state, { ...meta(312), kind: 'ParcelUpdate', tokenId, data: '0,"Name","",' })
+  apply(state, { ...meta(313, ESTATE), kind: 'CreateEstate', owner: ALICE, tokenId: 9n, data: '0,"My estate","",' })
+
+  const parcel = state.datas.get(parcelId(tokenId))!
+  assert.equal(parcel.name, 'Name')
+  assert.equal(parcel.description, null)
+  assert.equal(parcel.ipns, 'ipns')
+  const estate = state.datas.get('9')!
+  assert.equal(estate.name, 'My estate')
+  assert.equal(estate.description, null)
+})
+
 test('estates: create, add and remove land, with history that keeps the estate id', () => {
   const state = new LandState(ESTATE)
   const landA = encodeTokenId(10n, 10n)

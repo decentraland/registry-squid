@@ -58,6 +58,17 @@ test('adding a third party mirrors the subgraph, managers reversed and unapprove
   assert.equal((await state.get(ThirdPartyCount, 'all'))!.thirdPartyTotal, 1n)
 })
 
+test('an empty name or description searches as null, as the subgraph stores it', async () => {
+  const state = new ThirdPartyState(loader)
+  await applyThirdPartyEvent(state, added(meta(1), 'tp:1:Crypto Punks::mainnet-0xABC'))
+
+  const tp = (await state.get(ThirdParty, ID))!
+  assert.equal(tp.searchName, 'Crypto Punks')
+  assert.equal(tp.searchDescription, null)
+  assert.equal(tp.searchText, 'crypto punks ')
+  assert.equal((await state.get(ThirdPartyMetadata, ID))!.description, '')
+})
+
 test('an invalid URN is ignored', async () => {
   const state = new ThirdPartyState(loader)
   await applyThirdPartyEvent(state, { ...added(meta(1)), thirdPartyId: 'urn:decentraland:matic:collections-v2:x' })

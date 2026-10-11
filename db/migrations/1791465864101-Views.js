@@ -61,8 +61,8 @@ const VIEWS = {
       FROM third_party_root_history h`,
 }
 
-module.exports = class Views1791465864100 {
-  name = 'Views1791465864100'
+module.exports = class Views1791465864101 {
+  name = 'Views1791465864101'
 
   async up(db) {
     for (const [name, sql] of Object.entries(VIEWS)) {

@@ -85,9 +85,11 @@ function mergeData(state: LandState, id: string, data: LandData): Data {
     state.datas.set(id, d)
   }
   d.version = data.version
-  if (data.name !== undefined) d.name = data.name
-  if (data.description !== undefined) d.description = data.description
-  if (data.ipns !== undefined) d.ipns = data.ipns
+  // An empty value reads null, as in the subgraph: its generated setters unset a nullable string
+  // given "" (falsy in AssemblyScript) instead of storing it.
+  if (data.name !== undefined) d.name = data.name || null
+  if (data.description !== undefined) d.description = data.description || null
+  if (data.ipns !== undefined) d.ipns = data.ipns || null
   state.touchedDatas.add(id)
   return d
 }
