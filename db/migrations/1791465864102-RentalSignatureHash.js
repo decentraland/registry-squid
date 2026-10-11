@@ -8,8 +8,8 @@
 //
 // The schema cannot declare a hash index, so it lives here. A regenerated migration would not know
 // about it: keep this file, or recreate the index, when the table migration is regenerated.
-module.exports = class RentalSignatureHash1791465864101 {
-    name = 'RentalSignatureHash1791465864101'
+module.exports = class RentalSignatureHash1791465864102 {
+    name = 'RentalSignatureHash1791465864102'
 
     async up(db) {
         await db.query(`CREATE INDEX "idx_rental_signature_hash" ON "rental" USING hash ("signature")`)

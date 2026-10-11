@@ -130,8 +130,10 @@ async function buildMetadata(state: ThirdPartyState, id: string, raw: string): P
 async function setSearchFields(state: ThirdPartyState, thirdParty: ThirdParty) {
   const metadata = await state.get(ThirdPartyMetadata, thirdParty.id)
   if (!metadata) return
-  thirdParty.searchName = metadata.name
-  thirdParty.searchDescription = metadata.description
+  // An empty value reads null, as in the subgraph: its generated setters unset a nullable string
+  // given "" (falsy in AssemblyScript) instead of storing it.
+  thirdParty.searchName = metadata.name || null
+  thirdParty.searchDescription = metadata.description || null
   thirdParty.searchText = asciiLowerCase(metadata.name + ' ' + metadata.description)
 }
 
