@@ -103,6 +103,14 @@ scratch next to the running one. Space-separated `READER_ROLES` are granted read
 schema. Without `SQUID_ENABLED`, the image only serves the GraphQL API, over the schema named by
 `DB_SCHEMA` (the promoted one).
 
+The API (`serve:prod` in `commands.json`) shares its database with other services, so it bounds what
+one query can take from it: each SQL statement runs for at most 10 seconds (just over the 9 seconds
+the subgraph proxy in front of it waits before falling back), and a query asks for at most 100 root
+fields. It sets no `--max-response-size`: that limit is checked against an estimate that multiplies
+the `first` of every nested list, and the Builder's land query nests lists of 1000 three levels deep
+(`authorizations { owner { estates { parcels } } }`), which estimates in the billions of nodes
+however few rows it returns.
+
 ## License
 
 [MIT](LICENSE)
