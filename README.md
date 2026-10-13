@@ -112,6 +112,11 @@ two multiply. A request runs one statement per root field, one after another on 
 it can hold that connection for up to 20 × 10 seconds, and nothing stops it when the subgraph proxy
 in front of it gives up at 9 seconds and falls back.
 
+It reads each request in a `REPEATABLE READ` transaction, so all of a request's root fields see the
+same snapshot, as they do on a subgraph. The server's default, `SERIALIZABLE`, adds nothing for a
+read-only request over tables the processors write a whole batch at a time, and Postgres refuses it
+on a read replica (a hot standby), which the API reads from in production.
+
 It sets no `--max-response-size`: that limit is checked against an estimate that multiplies
 the `first` of every nested list, and the Builder's land query nests lists of 1000 three levels deep
 (`authorizations { owner { estates { parcels } } }`), which estimates in the billions of nodes
