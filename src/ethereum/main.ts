@@ -113,7 +113,7 @@ run(
     if (items.length === 0) return
 
     const landEvents = items.flatMap((i) => (i.land ? [i.land] : []))
-    const land = await loadLandState(ctx.store, landEvents, contracts.estateRegistry)
+    const land = await loadLandState(ctx.store, landEvents, contracts.estateRegistry, contracts.emptyMetadataReadsNull)
     const rentals = new RentalsState(storeLoader(ctx.store))
     for (const item of items) {
       if (item.land) applyLandEvent(land, item.land)

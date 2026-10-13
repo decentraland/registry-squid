@@ -21,7 +21,7 @@ function apply(state: LandState, ev: LandEvent) {
 }
 
 test('a parcel transfer sets the owner, clears operators and writes three history rows', () => {
-  const state = new LandState(ESTATE)
+  const state = new LandState(ESTATE, false)
   const tokenId = encodeTokenId(-5n, -10n)
   apply(state, { ...meta(100), kind: 'ParcelApproval', owner: ALICE, operator: BOB, tokenId })
   apply(state, { ...meta(100), kind: 'ParcelUpdateOperator', tokenId, operator: CAROL })
@@ -41,7 +41,7 @@ test('a parcel transfer sets the owner, clears operators and writes three histor
 })
 
 test('the authorization log keeps every event and the state keeps the latest', () => {
-  const state = new LandState(ESTATE)
+  const state = new LandState(ESTATE, false)
   const first = meta(200)
   apply(state, { ...first, kind: 'Authorization', type: 'UpdateManager', owner: ALICE, operator: BOB, approved: true })
   apply(state, { ...meta(201), kind: 'Authorization', type: 'UpdateManager', owner: ALICE, operator: BOB, approved: false })
@@ -55,7 +55,7 @@ test('the authorization log keeps every event and the state keeps the latest', (
 })
 
 test('parcel metadata merges like graph-node: a missing field keeps its old value', () => {
-  const state = new LandState(ESTATE)
+  const state = new LandState(ESTATE, false)
   const tokenId = encodeTokenId(1n, 2n)
   apply(state, { ...meta(300), kind: 'ParcelTransfer', to: ALICE, tokenId })
   apply(state, { ...meta(301), kind: 'ParcelUpdate', tokenId, data: '0,"Name","Description",' })
@@ -68,25 +68,31 @@ test('parcel metadata merges like graph-node: a missing field keeps its old valu
   assert.equal(state.parcels.get(parcelId(tokenId))!.data?.id, parcelId(tokenId))
 })
 
-test('an empty metadata field reads null, as the subgraph stores it, while a missing one keeps its value', () => {
-  const state = new LandState(ESTATE)
-  const tokenId = encodeTokenId(3n, 4n)
-  apply(state, { ...meta(310), kind: 'ParcelTransfer', to: ALICE, tokenId })
-  apply(state, { ...meta(311), kind: 'ParcelUpdate', tokenId, data: '0,"Name","Description","ipns"' })
-  apply(state, { ...meta(312), kind: 'ParcelUpdate', tokenId, data: '0,"Name","",' })
-  apply(state, { ...meta(313, ESTATE), kind: 'CreateEstate', owner: ALICE, tokenId: 9n, data: '0,"My estate","",' })
+for (const [network, emptyMetadataReadsNull] of [
+  ['mainnet', false],
+  ['sepolia', true],
+] as const) {
+  test(`an empty metadata field reads as the ${network} subgraph stores it, while a missing one keeps its value`, () => {
+    const empty = emptyMetadataReadsNull ? null : ''
+    const state = new LandState(ESTATE, emptyMetadataReadsNull)
+    const tokenId = encodeTokenId(3n, 4n)
+    apply(state, { ...meta(310), kind: 'ParcelTransfer', to: ALICE, tokenId })
+    apply(state, { ...meta(311), kind: 'ParcelUpdate', tokenId, data: '0,"Name","Description","ipns"' })
+    apply(state, { ...meta(312), kind: 'ParcelUpdate', tokenId, data: '0,"","",' })
+    apply(state, { ...meta(313, ESTATE), kind: 'CreateEstate', owner: ALICE, tokenId: 9n, data: '0,"My estate","",' })
 
-  const parcel = state.datas.get(parcelId(tokenId))!
-  assert.equal(parcel.name, 'Name')
-  assert.equal(parcel.description, null)
-  assert.equal(parcel.ipns, 'ipns')
-  const estate = state.datas.get('9')!
-  assert.equal(estate.name, 'My estate')
-  assert.equal(estate.description, null)
-})
+    const parcel = state.datas.get(parcelId(tokenId))!
+    assert.equal(parcel.name, empty)
+    assert.equal(parcel.description, empty)
+    assert.equal(parcel.ipns, 'ipns')
+    const estate = state.datas.get('9')!
+    assert.equal(estate.name, 'My estate')
+    assert.equal(estate.description, empty)
+  })
+}
 
 test('estates: create, add and remove land, with history that keeps the estate id', () => {
-  const state = new LandState(ESTATE)
+  const state = new LandState(ESTATE, false)
   const landA = encodeTokenId(10n, 10n)
   const landB = encodeTokenId(10n, 11n)
   apply(state, { ...meta(400), kind: 'ParcelTransfer', to: ALICE, tokenId: landA })
@@ -115,7 +121,7 @@ test('estates: create, add and remove land, with history that keeps the estate i
 })
 
 test('events for an unknown estate are skipped with a warning, not invented', () => {
-  const state = new LandState(ESTATE)
+  const state = new LandState(ESTATE, false)
   apply(state, { ...meta(500, ESTATE), kind: 'AddLand', estateTokenId: 99n, landTokenId: encodeTokenId(0n, 0n) })
   apply(state, { ...meta(500, ESTATE), kind: 'EstateUpdateOperator', tokenId: 99n, operator: BOB })
   assert.equal(state.estates.size, 0)
@@ -124,7 +130,7 @@ test('events for an unknown estate are skipped with a warning, not invented', ()
 })
 
 test('wallets are created for every owner reference, the estate registry included', () => {
-  const state = new LandState(ESTATE)
+  const state = new LandState(ESTATE, false)
   apply(state, { ...meta(600, ESTATE), kind: 'EstateTransfer', to: ALICE, tokenId: 8n })
   apply(state, { ...meta(600, ESTATE), kind: 'CreateEstate', owner: ALICE, tokenId: 8n, data: '' })
   apply(state, { ...meta(600, ESTATE), kind: 'AddLand', estateTokenId: 8n, landTokenId: encodeTokenId(3n, 3n) })

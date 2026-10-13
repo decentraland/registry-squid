@@ -8,6 +8,12 @@ export interface EthereumContracts {
   estateStartBlock: number
   rentals: string
   rentalsStartBlock: number
+  /**
+   * Whether this network's LAND subgraph reads an empty LAND or estate metadata field as null. The
+   * Sepolia deployment's generated setters unset a nullable string given "" (falsy in
+   * AssemblyScript); the mainnet one is older (mapping API 0.0.3), and its setters store "" as given.
+   */
+  emptyMetadataReadsNull: boolean
 }
 
 const MAINNET: EthereumContracts = {
@@ -18,6 +24,7 @@ const MAINNET: EthereumContracts = {
   estateStartBlock: 6236547,
   rentals: '0x3a1469499d0be105d4f77045ca403a5f6dc2f3f5',
   rentalsStartBlock: 16070889,
+  emptyMetadataReadsNull: false,
 }
 
 const SEPOLIA: EthereumContracts = {
@@ -28,6 +35,7 @@ const SEPOLIA: EthereumContracts = {
   estateStartBlock: 3831232,
   rentals: '0xe70db6319e9cee3f604909bdade58d1f5c1cf702',
   rentalsStartBlock: 3831254,
+  emptyMetadataReadsNull: true,
 }
 
 export function getEthereumContracts(): EthereumContracts {
