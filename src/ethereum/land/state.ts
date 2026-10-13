@@ -46,7 +46,10 @@ export class LandState {
 
   readonly warnings: string[] = []
 
-  constructor(readonly estateRegistry: string) {}
+  constructor(
+    readonly estateRegistry: string,
+    readonly emptyMetadataReadsNull: boolean
+  ) {}
 }
 
 function wallet(state: LandState, address: string): Wallet {
@@ -85,11 +88,11 @@ function mergeData(state: LandState, id: string, data: LandData): Data {
     state.datas.set(id, d)
   }
   d.version = data.version
-  // An empty value reads null, as in the subgraph: its generated setters unset a nullable string
-  // given "" (falsy in AssemblyScript) instead of storing it.
-  if (data.name !== undefined) d.name = data.name || null
-  if (data.description !== undefined) d.description = data.description || null
-  if (data.ipns !== undefined) d.ipns = data.ipns || null
+  // An empty value reads as the network's subgraph stores it, see `emptyMetadataReadsNull`.
+  const value = (v: string) => (v === '' && state.emptyMetadataReadsNull ? null : v)
+  if (data.name !== undefined) d.name = value(data.name)
+  if (data.description !== undefined) d.description = value(data.description)
+  if (data.ipns !== undefined) d.ipns = value(data.ipns)
   state.touchedDatas.add(id)
   return d
 }

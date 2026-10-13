@@ -23,8 +23,13 @@ async function findByIds<E extends { id: string }>(
 }
 
 /** Loads every entity the batch's events can read, so handlers run in memory. */
-export async function loadLandState(store: Store, events: LandEvent[], estateRegistry: string): Promise<LandState> {
-  const state = new LandState(estateRegistry)
+export async function loadLandState(
+  store: Store,
+  events: LandEvent[],
+  estateRegistry: string,
+  emptyMetadataReadsNull: boolean
+): Promise<LandState> {
+  const state = new LandState(estateRegistry, emptyMetadataReadsNull)
   const parcels = new Set<string>()
   const estates = new Set<string>()
   const wallets = new Set<string>([estateRegistry])
