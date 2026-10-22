@@ -155,11 +155,20 @@ function rootHistory(state: ThirdPartyState, thirdParty: ThirdParty, ev: ThirdPa
 }
 
 /**
- * graph-node strips NUL characters from every string it stores, ids included, because Postgres text
- * cannot hold them. The subgraph validates and parses the raw strings first, so this module does
- * too, and strips only what it stores. A stored NUL would also fail the whole batch.
+ * graph-node strips NUL characters from every string value it stores, because Postgres text cannot
+ * hold them. The subgraph validates and parses the raw strings first, so this module does too, and
+ * strips only what it stores. A stored NUL would also fail the whole batch.
+ *
+ * An id with a NUL is another matter: graph-node keeps nothing of what the subgraph does for it. On
+ * amoy, `...:lacol-0d78` was added, then `...:lacol-0d78\u0000` by someone else, and the subgraph
+ * shows neither a new third party nor a change to the first, nor one more in its count. So events on
+ * such an id are skipped whole, rather than stripped onto the third party without the NUL.
  */
 export async function applyThirdPartyEvent(state: ThirdPartyState, ev: ThirdPartyEvent): Promise<void> {
+  if ('thirdPartyId' in ev && ev.thirdPartyId.includes('\u0000')) {
+    state.errors.push(`${ev.kind} on a third party id with a NUL character: ${sanitize(ev.thirdPartyId)}`)
+    return
+  }
   switch (ev.kind) {
     case 'ThirdPartyAdded': {
       if (!isURNValid(ev.thirdPartyId)) {

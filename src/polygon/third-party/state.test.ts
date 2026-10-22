@@ -159,11 +159,10 @@ test('linked contracts read sorted by id and once each, as graph-node resolves r
   )
 })
 
-test('NUL characters are stripped from stored strings, ids included, as graph-node does', async () => {
+test('NUL characters are stripped from stored strings, as graph-node does', async () => {
   const state = new ThirdPartyState(loader)
   await applyThirdPartyEvent(state, {
     ...added(meta(1), 'tp:1:Pun\u0000ks:De\u0000sc:polygon-0xa\u0000aa'),
-    thirdPartyId: `${ID}\u0000`,
     resolver: 'https://api.example.com/\u0000',
   })
   const tp = (await state.get(ThirdParty, ID))!
@@ -171,9 +170,23 @@ test('NUL characters are stripped from stored strings, ids included, as graph-no
   assert.equal(tp.resolver, 'https://api.example.com/')
   assert.equal(tp.searchText, 'punks desc')
   assert.deepEqual((await state.get(ThirdPartyMetadata, ID))!.contracts!.map((c) => c.id), ['polygon-0xaaa'])
+})
 
-  await applyThirdPartyEvent(state, { ...meta(2), kind: 'ThirdPartyItemSlotsBought', thirdPartyId: `${ID}\u0000`, value: 5n })
-  assert.equal(tp.maxItems, 15n)
+test('events on a third party id with a NUL character are skipped whole, as graph-node keeps none of them', async () => {
+  const state = new ThirdPartyState(loader)
+  await applyThirdPartyEvent(state, added(meta(1)))
+  await applyThirdPartyEvent(state, { ...meta(2), kind: 'ThirdPartyReviewedWithRoot', thirdPartyId: ID, root: ROOT, isApproved: true })
+
+  await applyThirdPartyEvent(state, { ...added(meta(3)), thirdPartyId: `${ID}\u0000`, managers: [M3], itemSlots: 1n })
+  await applyThirdPartyEvent(state, { ...meta(4), kind: 'ThirdPartyItemSlotsBought', thirdPartyId: `${ID}\u0000`, value: 5n })
+
+  const tp = (await state.get(ThirdParty, ID))!
+  assert.equal(tp.root, ROOT)
+  assert.equal(tp.isApproved, true)
+  assert.deepEqual(tp.managers, [M2, M1])
+  assert.equal(tp.maxItems, 10n)
+  assert.equal((await state.get(ThirdPartyCount, 'all'))!.thirdPartyTotal, 1n)
+  assert.equal(state.errors.length, 2)
 })
 
 test('only ASCII letters are lowercased, as the subgraph helper does', () => {
