@@ -6,8 +6,9 @@
 # the same numbers. That includes what it does oddly:
 #   - amounts (released, total, vestedPerPeriod, a release's amount) are whole tokens: wei / 10^18,
 #     rounded down;
-#   - a version 1 release's amount is the running total the contract emits, not what was released,
-#     and `released` adds those up; readers correct it;
+#   - a version 1 release's amount is the running total the contract emits (`Released(released)` in
+#     Decentraland's TokenVesting), not what was released, and `released` adds those up; readers
+#     correct it;
 #   - a version 1 vesting's total comes from a fixed list of addresses, and is 0 for the rest;
 #   - cliff is a timestamp (version 2: start + getCliff()); a version 2 duration is its period times
 #     its number of periods; version 1 has no periods, stop or pause.

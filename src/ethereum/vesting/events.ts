@@ -44,6 +44,17 @@ export function decodeVestingLog(
     if (topic !== factoryAbi.events.VestingCreated.topic) return undefined
     return { ...meta, kind: 'VestingCreated', vesting: lower(factoryAbi.events.VestingCreated.decode(log)._address) }
   }
+  // Read by topic past the snapshot, these may come from any contract, and one whose event has another
+  // layout (an indexed amount, say) fails to decode: it is not a vesting's, and must not stop the
+  // processor.
+  try {
+    return decodeVestingEvent(address, topic, log, meta)
+  } catch {
+    return undefined
+  }
+}
+
+function decodeVestingEvent(address: string, topic: string, log: { topics: string[]; data: string }, meta: VestingMeta): VestingEvent | undefined {
   switch (topic) {
     case v1Abi.events.Released.topic:
       return { ...meta, kind: 'ReleasedV1', vesting: address, amount: v1Abi.events.Released.decode(log).amount }

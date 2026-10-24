@@ -1,22 +1,26 @@
-import { RpcClient } from '@subsquid/rpc-client'
+import { RpcClient, RpcError } from '@subsquid/rpc-client'
 import * as v1Abi from '../../abi/TokenVesting'
 import * as v2Abi from '../../abi/PeriodicTokenVesting'
 import { lower } from '../../common/hex'
 import { VestingNetwork } from './config'
 import { tokens, VestingFields, VestingReader } from './state'
 
-/** A call the contract refused: on a version 2 contract, a version 1 function it does not have. */
-function reverted(e: unknown): boolean {
-  return /revert/i.test(e instanceof Error ? e.message : String(e))
+/**
+ * A call the contract refused, as the node reports it: on a version 2 contract, a version 1 function
+ * it does not have. A transport failure, a timeout or a rate limit is not one, whatever its text.
+ */
+export function reverted(e: unknown): boolean {
+  return e instanceof RpcError && (e.code === 3 || /revert/i.test(e.message))
 }
 
 /**
  * Reads a vesting contract over RPC at the block the factory created it at, as the subgraph's
- * mapping does: a contract that answers `duration()` is version 1 (TokenVesting), any other version 2
+ * mapping does, at the end of that block: a release or pause later in the same block is already in
+ * what it reads, and is then applied once more, as on the subgraph. Also as the mapping does: a contract that answers `duration()` is version 1 (TokenVesting), any other version 2
  * (PeriodicTokenVesting). See schema/vesting.graphql for how each field is read.
  */
-export function createVestingReader(network: VestingNetwork, rpc: RpcClient): VestingReader {
-  const chain = { _chain: { client: { call: <T>(method: string, params?: unknown[]) => rpc.call<T>(method, params as unknown[]) } } }
+export function createVestingReader(network: VestingNetwork, rpc: Pick<RpcClient, 'call'>): VestingReader {
+  const chain = { _chain: { client: rpc } }
 
   async function readV1(contract: v1Abi.Contract, vesting: string, duration: bigint): Promise<VestingFields> {
     const [token, owner, beneficiary, revoked, revocable, released, start, cliff] = await Promise.all([

@@ -15,7 +15,7 @@ import { getVestingNetwork } from './vesting/config'
 import { decodeVestingLog, VESTING_TOPICS, VestingEvent } from './vesting/events'
 import { createVestingReader } from './vesting/reader'
 import { applyVestingEvent, VestingState } from './vesting/state'
-import { PausedLog, ReleaseLog, Vesting } from '../model'
+import { Vesting } from '../model'
 
 const logger = createLogger('sqd:ethereum')
 const contracts = getEthereumContracts()
@@ -26,7 +26,15 @@ const from = getStartBlock() ?? contracts.landStartBlock
 // has logs. The public RPC of the network unless RPC_ENDPOINT_ETH says otherwise.
 const vestingReader = createVestingReader(
   vestings,
-  new RpcClient({ url: process.env.RPC_ENDPOINT_ETH || vestings.rpc, capacity: 20, rateLimit: 20 })
+  // A batch fails if one read does, and is retried from scratch: rate limits and timeouts are retried
+  // here instead, for as long as they last, as the portal's are.
+  new RpcClient({
+    url: process.env.RPC_ENDPOINT_ETH || vestings.rpc,
+    capacity: 20,
+    rateLimit: 20,
+    retryAttempts: Number.MAX_SAFE_INTEGER,
+    retrySchedule: [1000, 2000, 5000, 10000, 30000],
+  })
 )
 
 const dataSource = new DataSourceBuilder()
@@ -166,8 +174,8 @@ run(
     await saveLandState(ctx.store, land)
     for (const cls of SAVE_ORDER) await ctx.store.upsert(rentals.entitiesToSave(cls))
     await ctx.store.upsert([...vestingState.vestings.values()])
-    await ctx.store.upsert([...vestingState.releaseLogs.values()] as ReleaseLog[])
-    await ctx.store.upsert([...vestingState.pausedLogs.values()] as PausedLog[])
+    await ctx.store.upsert([...vestingState.releaseLogs.values()])
+    await ctx.store.upsert([...vestingState.pausedLogs.values()])
 
     for (const warning of land.warnings) logger.warn(warning)
     for (const error of rentals.errors) logger.warn(error)

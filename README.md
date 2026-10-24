@@ -81,7 +81,10 @@ coordinates are decoded from the token id.
 The processor reads the vesting contracts it knows by address, from a snapshot of the factory's
 contracts (`src/ethereum/vesting/snapshot-<dataset>.json`), and anything past the snapshot's height
 by topic, keeping only contracts the factory created. An old snapshot is still correct, only slower
-to index past it; `RPC_ENDPOINT_ETH=<url> npm run vestings:snapshot` refreshes it (`ETHEREUM_CHAIN_ID`
+to index past it: past the snapshot every contract emitting those events is read (`Paused` and
+`Unpaused` are OpenZeppelin's, so on the SQD portal that is every pausable contract on mainnet), and
+each one costs a lookup; on chain-lake only Decentraland's contracts are there. Refresh it before a
+reindex: `RPC_ENDPOINT_ETH=<url> npm run vestings:snapshot` refreshes it (`ETHEREUM_CHAIN_ID`
 picks the network).
 
 ## Comparing with a subgraph

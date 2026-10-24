@@ -7,9 +7,11 @@ import { toHex } from '../../common/hex'
 import { Vesting } from '../../model'
 import { VESTING_NETWORKS } from './config'
 import { decodeVestingLog, VestingEvent } from './events'
+import { RpcConnectionError, RpcError } from '@subsquid/rpc-client'
+import { createVestingReader, reverted } from './reader'
 import { applyVestingEvent, VestingFields, VestingReader, VestingState } from './state'
 
-const network = VESTING_NETWORKS['1']
+const network = VESTING_NETWORKS['ethereum-mainnet']
 const VESTING = '0x02d2c06c1b0e1c2a6f9e4d6e8f1a2b3c4d5e6f70'
 const OWNER = '0x' + '0a'.repeat(20)
 const word = (address: string) => '0x' + '0'.repeat(24) + address.slice(2)
@@ -146,4 +148,37 @@ test('a vesting created in an earlier batch is read from the store', async () =>
 test('logs of the factory other than creations, and of unrelated events, are not vesting events', () => {
   assert.equal(decodeVestingLog({ address: network.factory, topics: [v1Abi.events.Revoked.topic], data: '0x' }, at(1, 1), network), undefined)
   assert.equal(decodeVestingLog({ address: VESTING, topics: ['0x' + '12'.repeat(32)], data: '0x' }, at(1, 1), network), undefined)
+})
+
+test('an event of another contract with a vesting event\'s topic and another layout is left out, not thrown', () => {
+  // Released(uint256) with the amount indexed: no data to decode.
+  assert.equal(decodeVestingLog({ address: '0x' + 'ee'.repeat(20), topics: [v1Abi.events.Released.topic, uint(1n)], data: '0x' }, at(1, 1), network), undefined)
+  // Released(address,uint256) with the address not indexed: one topic short.
+  assert.equal(decodeVestingLog({ address: '0x' + 'ee'.repeat(20), topics: [v2Abi.events.Released.topic], data: word(OWNER) + uint(1n).slice(2) }, at(1, 1), network), undefined)
+})
+
+test('only a revert the node reports makes a contract version 2', () => {
+  assert.equal(reverted(new RpcError({ code: 3, message: 'execution reverted' })), true)
+  assert.equal(reverted(new RpcError({ code: -32000, message: 'execution reverted' })), true)
+  assert.equal(reverted(new RpcConnectionError('socket hang up while reverting')), false)
+  assert.equal(reverted(new Error('execution reverted')), false)
+})
+
+test('the reader tells the versions apart by duration(), and lets other failures through', async () => {
+  const calls: string[] = []
+  const answer = (data: string) => async (method: string, params?: unknown[]) => {
+    const call = (params as [{ data: string }])[0].data.slice(0, 10)
+    calls.push(call)
+    if (call === v1Abi.functions.duration.selector) {
+      if (data === 'v2') throw new RpcError({ code: 3, message: 'execution reverted' })
+      if (data === 'down') throw new RpcConnectionError('socket hang up')
+    }
+    return '0x' + '0'.repeat(64)
+  }
+  const v2 = await createVestingReader(network, { call: answer('v2') as never }).read(VESTING, 1)
+  assert.equal(v2.version, 2)
+  assert.ok(calls.includes(v2Abi.functions.getVestedPerPeriod.selector) || calls.length > 1)
+  const v1 = await createVestingReader(network, { call: answer('v1') as never }).read(VESTING, 1)
+  assert.equal(v1.version, 1)
+  await assert.rejects(createVestingReader(network, { call: answer('down') as never }).read(VESTING, 1), RpcConnectionError)
 })

@@ -1,3 +1,4 @@
+import { getEthereumContracts } from '../config'
 import mainnetSnapshot from './snapshot-ethereum-mainnet.json'
 import sepoliaSnapshot from './snapshot-ethereum-sepolia.json'
 import mainnetV1Totals from './v1-totals.json'
@@ -7,6 +8,11 @@ export interface VestingNetwork {
   dataset: string
   /** The minimal proxy factory every vesting contract was created with. */
   factory: string
+  /**
+   * Where the subgraph starts reading the factory, and so where this does: not where the factory was
+   * deployed. On mainnet it was deployed at 10,772,475 and created 132 version 1 vestings before
+   * this block, which the subgraph, and so governance, never shows.
+   */
   factoryStartBlock: number
   /** `VestingCreated(address indexed, bytes32)` */
   vestingCreatedTopic: string
@@ -23,8 +29,9 @@ export interface VestingNetwork {
 
 const VESTING_CREATED = '0xeaa996f76fa9fcacd351918a2a275ae6d45845f79256ffbe8c0a87ca608e9970'
 
+/** By dataset, as `getEthereumContracts` names the network. */
 export const VESTING_NETWORKS: Record<string, VestingNetwork> = {
-  '1': {
+  'ethereum-mainnet': {
     dataset: 'ethereum-mainnet',
     factory: '0xe357273545c152f07afe2c38257b7b653fd3f6d0',
     factoryStartBlock: 12732617,
@@ -33,7 +40,7 @@ export const VESTING_NETWORKS: Record<string, VestingNetwork> = {
     snapshot: mainnetSnapshot,
     v1Totals: mainnetV1Totals,
   },
-  '11155111': {
+  'ethereum-sepolia': {
     dataset: 'ethereum-sepolia',
     factory: '0x71c84760df0537f7db286274817462dc2e6c1366',
     factoryStartBlock: 3831258,
@@ -45,8 +52,8 @@ export const VESTING_NETWORKS: Record<string, VestingNetwork> = {
 }
 
 export function getVestingNetwork(): VestingNetwork {
-  const chainId = process.env.ETHEREUM_CHAIN_ID || '1'
-  const network = VESTING_NETWORKS[chainId]
-  if (!network) throw new Error(`Unsupported ETHEREUM_CHAIN_ID: ${chainId}`)
+  const { dataset } = getEthereumContracts()
+  const network = VESTING_NETWORKS[dataset]
+  if (!network) throw new Error(`No vesting factory on ${dataset}`)
   return network
 }

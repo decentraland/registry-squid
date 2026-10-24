@@ -1,7 +1,7 @@
 {
   "name": "registry-squid",
   "private": true,
-  "description": "Indexes Decentraland's LAND permissions, rentals and third-party registry",
+  "description": "Indexes Decentraland's LAND permissions, rentals, third-party registry and vesting contracts",
   "license": "MIT",
   "repository": "github:decentraland/registry-squid",
   "engines": {
