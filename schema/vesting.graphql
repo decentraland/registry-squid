@@ -1,0 +1,58 @@
+# Decentraland's vesting contracts on Ethereum: every TokenVesting (version 1) and
+# PeriodicTokenVesting (version 2) the vesting factory created.
+#
+# Entity names, fields, ids and values follow the vestings subgraph (deployment
+# QmV6EB6uq5548oCdcjYU3pz1jLwwkSoKUg6DY5dZrAgvTN), so its queries run unchanged and its readers read
+# the same numbers. That includes what it does oddly:
+#   - amounts (released, total, vestedPerPeriod, a release's amount) are whole tokens: wei / 10^18,
+#     rounded down;
+#   - a version 1 release's amount is the running total the contract emits, not what was released,
+#     and `released` adds those up; readers correct it;
+#   - a version 1 vesting's total comes from a fixed list of addresses, and is 0 for the rest;
+#   - cliff is a timestamp (version 2: start + getCliff()); a version 2 duration is its period times
+#     its number of periods; version 1 has no periods, stop or pause.
+#
+# Id formats:
+#   Vesting     the contract's address
+#   ReleaseLog  "<vesting>-<timestamp>" (two releases of one vesting in one block share it)
+#   PausedLog   "<vesting>-<timestamp>-<Paused|Unpaused>"
+
+type Vesting @entity {
+  id: ID!
+  version: Int!
+  duration: BigInt!
+  cliff: BigInt!
+  beneficiary: Bytes!
+  revoked: Boolean!
+  revocable: Boolean!
+  released: BigInt!
+  start: BigInt!
+  periodDuration: BigInt!
+  # [BigInt!]! on the subgraph; the squid's codegen has no BigInt lists. Both answer it as a list
+  # of decimal strings.
+  vestedPerPeriod: [String!]!
+  paused: Boolean!
+  pausable: Boolean!
+  stop: BigInt!
+  linear: Boolean!
+  token: Bytes!
+  owner: Bytes!
+  total: BigInt!
+  releaseLogs: [ReleaseLog!]! @derivedFrom(field: "vesting")
+  pausedLogs: [PausedLog!]! @derivedFrom(field: "vesting")
+  revokeTimestamp: BigInt
+}
+
+type ReleaseLog @entity {
+  id: ID!
+  timestamp: BigInt!
+  amount: BigInt!
+  vesting: Vesting!
+}
+
+type PausedLog @entity {
+  id: ID!
+  timestamp: BigInt!
+  eventType: String!
+  vesting: Vesting!
+}

@@ -1,4 +1,5 @@
 import { DataSourceBuilder } from '@subsquid/evm-stream'
+import { RpcClient } from '@subsquid/rpc-client'
 import { PrometheusServer, run } from '@subsquid/batch-processor'
 import { Store, TypeormDatabase } from '@subsquid/typeorm-store'
 import { createLogger } from '@subsquid/logger'
@@ -10,10 +11,23 @@ import { applyLandEvent } from './land/state'
 import { loadLandState, saveLandState } from './land/persist'
 import { decodeRentalsLog, RENTALS_TOPICS, RentalsEvent } from './rentals/events'
 import { applyRentalsEvent, RentalsLoader, RentalsState, SAVE_ORDER } from './rentals/state'
+import { getVestingNetwork } from './vesting/config'
+import { decodeVestingLog, VESTING_TOPICS, VestingEvent } from './vesting/events'
+import { createVestingReader } from './vesting/reader'
+import { applyVestingEvent, VestingState } from './vesting/state'
+import { PausedLog, ReleaseLog, Vesting } from '../model'
 
 const logger = createLogger('sqd:ethereum')
 const contracts = getEthereumContracts()
+const vestings = getVestingNetwork()
 const from = getStartBlock() ?? contracts.landStartBlock
+
+// Vesting contracts are read once, at the block the factory creates them, over RPC: the portal only
+// has logs. The public RPC of the network unless RPC_ENDPOINT_ETH says otherwise.
+const vestingReader = createVestingReader(
+  vestings,
+  new RpcClient({ url: process.env.RPC_ENDPOINT_ETH || vestings.rpc, capacity: 20, rateLimit: 20 })
+)
 
 const dataSource = new DataSourceBuilder()
   .setPortal(portalSource(contracts.dataset))
@@ -36,6 +50,20 @@ const dataSource = new DataSourceBuilder()
     include: { transaction: true },
     range: { from: Math.max(from, contracts.rentalsStartBlock) },
   })
+  .addLog({
+    where: { address: [vestings.factory], topic0: [vestings.vestingCreatedTopic] },
+    range: { from: Math.max(from, vestings.factoryStartBlock) },
+  })
+  // The vesting contracts the snapshot knows, by address; any created after it, by topic: their events
+  // are kept only for contracts the factory created (VestingState).
+  .addLog({
+    where: { address: vestings.snapshot.addresses.length ? vestings.snapshot.addresses : [vestings.factory], topic0: VESTING_TOPICS },
+    range: { from: Math.max(from, vestings.factoryStartBlock), to: Math.max(vestings.snapshot.height, vestings.factoryStartBlock) },
+  })
+  .addLog({
+    where: { topic0: VESTING_TOPICS },
+    range: { from: Math.max(from, vestings.snapshot.height + 1, vestings.factoryStartBlock) },
+  })
   .build()
 
 // SQUID_SCHEMA, never DB_SCHEMA: promotion renames the deployment schema, and a search_path pinned
@@ -53,7 +81,7 @@ const db = new TypeormDatabase({
 const prometheus = new PrometheusServer()
 prometheus.setPort(Number(process.env.ETHEREUM_PROMETHEUS_PORT || 3000))
 
-type Item = { land?: LandEvent; rentals?: RentalsEvent }
+type Item = { land?: LandEvent; rentals?: RentalsEvent; vesting?: VestingEvent }
 
 /**
  * The rentals subgraph listens to UpdateOperator of the contracts it rents from. Only LAND and
@@ -67,6 +95,7 @@ function rentableUpdate(ev: LandEvent): RentalsEvent | undefined {
 }
 
 const RENTABLE_CONTRACTS = new Set([contracts.landRegistry, contracts.estateRegistry])
+const OTHER_CONTRACTS = new Set([contracts.landRegistry, contracts.estateRegistry, contracts.rentals])
 
 function storeLoader(store: Store): RentalsLoader {
   return { get: (cls, id) => store.get(cls, id) }
@@ -91,6 +120,18 @@ run(
           transactionHash: log.transactionHash,
         }
         const blockInfo = { number: block.header.number, timestampMs: block.header.timestamp }
+        // Vesting events share their signatures with other contracts' (Rentals is pausable too): only
+        // logs of the factory, or of contracts other than the ones above, are vesting events.
+        const address = lower(log.address)
+        if (address === vestings.factory || (VESTING_TOPICS.includes(log.topics[0]) && !OTHER_CONTRACTS.has(address))) {
+          const vesting = decodeVestingLog(
+            raw,
+            { blockNumber: block.header.number, timestamp: BigInt(Math.floor(block.header.timestamp / 1000)) },
+            vestings
+          )
+          if (vesting) items.push({ vesting })
+          continue
+        }
         if (lower(log.address) === contracts.rentals) {
           const meta: EventMeta = {
             blockNumber: block.header.number,
@@ -115,13 +156,18 @@ run(
     const landEvents = items.flatMap((i) => (i.land ? [i.land] : []))
     const land = await loadLandState(ctx.store, landEvents, contracts.estateRegistry, contracts.emptyMetadataReadsNull)
     const rentals = new RentalsState(storeLoader(ctx.store))
+    const vestingState = new VestingState({ get: (id) => ctx.store.get(Vesting, id) })
     for (const item of items) {
       if (item.land) applyLandEvent(land, item.land)
       if (item.rentals) await applyRentalsEvent(rentals, item.rentals)
+      if (item.vesting) await applyVestingEvent(vestingState, item.vesting, vestingReader)
     }
 
     await saveLandState(ctx.store, land)
     for (const cls of SAVE_ORDER) await ctx.store.upsert(rentals.entitiesToSave(cls))
+    await ctx.store.upsert([...vestingState.vestings.values()])
+    await ctx.store.upsert([...vestingState.releaseLogs.values()] as ReleaseLog[])
+    await ctx.store.upsert([...vestingState.pausedLogs.values()] as PausedLog[])
 
     for (const warning of land.warnings) logger.warn(warning)
     for (const error of rentals.errors) logger.warn(error)

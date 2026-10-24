@@ -16,7 +16,8 @@
     "migration:generate": "squid-typeorm-migration generate",
     "processor:ethereum": "node lib/ethereum/main.js",
     "processor:polygon": "node lib/polygon/main.js",
-    "serve": "squid-graphql-server --dialect thegraph"
+    "serve": "squid-graphql-server --dialect thegraph",
+    "vestings:snapshot": "npm run build && node lib/tools/vestings-snapshot.js"
   },
   "dependencies": {
     "@subsquid/batch-processor": "^1.1.0",
@@ -26,6 +27,7 @@
     "@subsquid/evm-stream": "^0.1.4",
     "@subsquid/graphql-server": "^4.12.1",
     "@subsquid/logger": "^1.3.3",
+    "@subsquid/rpc-client": "^4.16.1",
     "@subsquid/typeorm-migration": "^1.3.0",
     "@subsquid/typeorm-store": "^1.9.2",
     "@subsquid/util-internal": "^3.2.0",
