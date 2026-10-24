@@ -23,9 +23,12 @@ export interface VestingFields {
   total: bigint
 }
 
-/** Reads a new vesting contract at the block that created it (`./reader`). */
+/**
+ * Reads a new vesting contract at the block that created it (`./reader`), or answers `undefined` for
+ * a contract that is not one it can read.
+ */
 export interface VestingReader {
-  read(vesting: string, blockNumber: number): Promise<VestingFields>
+  read(vesting: string, block: { height: number; hash: string }): Promise<VestingFields | undefined>
 }
 
 /** Wei as the subgraph keeps amounts: whole tokens, rounded down. */
@@ -36,6 +39,8 @@ export class VestingState {
   readonly vestings = new Map<string, Vesting>()
   readonly releaseLogs = new Map<string, ReleaseLog>()
   readonly pausedLogs = new Map<string, PausedLog>()
+  /** The contracts the factory created that could not be read as vestings, left out. */
+  readonly warnings: string[] = []
   private readonly missing = new Set<string>()
 
   constructor(private readonly loader: { get(id: string): Promise<Vesting | undefined> }) {}
@@ -61,7 +66,11 @@ export class VestingState {
  */
 export async function applyVestingEvent(state: VestingState, ev: VestingEvent, reader: VestingReader): Promise<void> {
   if (ev.kind === 'VestingCreated') {
-    const fields = await reader.read(ev.vesting, ev.blockNumber)
+    const fields = await reader.read(ev.vesting, { height: ev.blockNumber, hash: ev.blockHash })
+    if (!fields) {
+      state.warnings.push(`${ev.vesting}, created at block ${ev.blockNumber}, cannot be read as a vesting contract: left out`)
+      return
+    }
     state.create(
       new Vesting({
         ...fields,

@@ -10,7 +10,7 @@ export interface VestingNetwork {
   factory: string
   /**
    * Where the subgraph starts reading the factory, and so where this does: not where the factory was
-   * deployed. On mainnet it was deployed at 10,772,475 and created 132 version 1 vestings before
+   * deployed. On mainnet it was deployed at 10,772,475 and created 131 version 1 vestings before
    * this block, which the subgraph, and so governance, never shows.
    */
   factoryStartBlock: number

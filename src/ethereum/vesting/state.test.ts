@@ -38,12 +38,13 @@ const v1Fields: VestingFields = {
   total: 35000n,
 }
 
-function setup(fields: VestingFields = v1Fields) {
-  const reads: [string, number][] = []
+/** `null`: a contract the reader cannot read as a vesting. */
+function setup(fields: VestingFields | null = v1Fields) {
+  const reads: [string, number, string][] = []
   const reader: VestingReader = {
-    async read(vesting, blockNumber) {
-      reads.push([vesting, blockNumber])
-      return fields
+    async read(vesting, { height, hash }) {
+      reads.push([vesting, height, hash])
+      return fields ?? undefined
     },
   }
   const state = new VestingState({ get: async () => undefined })
@@ -51,7 +52,7 @@ function setup(fields: VestingFields = v1Fields) {
   return { state, reads, apply }
 }
 
-const at = (blockNumber: number, timestamp: number) => ({ blockNumber, timestamp: BigInt(timestamp) })
+const at = (blockNumber: number, timestamp: number) => ({ blockNumber, blockHash: `0xb${blockNumber}`, timestamp: BigInt(timestamp) })
 
 test('the factory creates a vesting, read at its block, with the subgraph\'s fields', async () => {
   const log = { address: network.factory, topics: [factoryAbi.events.VestingCreated.topic, word(VESTING)], data: '0x' + '00'.repeat(32) }
@@ -60,7 +61,7 @@ test('the factory creates a vesting, read at its block, with the subgraph\'s fie
 
   const { state, reads, apply } = setup()
   await apply(ev!)
-  assert.deepEqual(reads, [[VESTING, 15000000]])
+  assert.deepEqual(reads, [[VESTING, 15000000, '0xb15000000']])
   const vesting = state.vestings.get(VESTING)!
   assert.equal(toHex(vesting.beneficiary), OWNER)
   assert.equal(vesting.total, 35000n)
@@ -131,6 +132,24 @@ test('pauses, unpauses and revocations update the vesting and log the pauses', a
   )
 })
 
+test('a release in the block that created the vesting is added to what was read at the end of it, as on the subgraph', async () => {
+  const { state, apply } = setup({ ...v1Fields, released: 10n })
+  await apply({ ...at(1, 100), kind: 'VestingCreated', vesting: VESTING })
+  await apply({ ...at(1, 100), kind: 'ReleasedV2', vesting: VESTING, amount: 10n * ETH })
+  assert.equal(state.vestings.get(VESTING)!.released, 20n)
+  assert.deepEqual([...state.releaseLogs.keys()], [`${VESTING}-100`])
+})
+
+test('a contract the factory created that cannot be read as a vesting is left out, with a warning, and so are its events', async () => {
+  const { state, apply } = setup(null)
+  await apply({ ...at(1, 100), kind: 'VestingCreated', vesting: VESTING })
+  await apply({ ...at(2, 200), kind: 'Paused', vesting: VESTING })
+  assert.equal(state.vestings.size, 0)
+  assert.equal(state.pausedLogs.size, 0)
+  assert.equal(state.warnings.length, 1)
+  assert.match(state.warnings[0], new RegExp(VESTING))
+})
+
 test('events of contracts the factory did not create are left out', async () => {
   const { state, apply } = setup()
   await apply({ ...at(2, 200), kind: 'Paused', vesting: '0x' + 'ee'.repeat(20) })
@@ -164,21 +183,121 @@ test('only a revert the node reports makes a contract version 2', () => {
   assert.equal(reverted(new Error('execution reverted')), false)
 })
 
-test('the reader tells the versions apart by duration(), and lets other failures through', async () => {
-  const calls: string[] = []
-  const answer = (data: string) => async (method: string, params?: unknown[]) => {
-    const call = (params as [{ data: string }])[0].data.slice(0, 10)
-    calls.push(call)
-    if (call === v1Abi.functions.duration.selector) {
-      if (data === 'v2') throw new RpcError({ code: 3, message: 'execution reverted' })
-      if (data === 'down') throw new RpcConnectionError('socket hang up')
-    }
-    return '0x' + '0'.repeat(64)
+const pad = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+const encodeUint = (n: bigint) => pad(n.toString(16))
+const encodeAddress = (a: string) => pad(a)
+const encodeBool = (b: boolean) => encodeUint(b ? 1n : 0n)
+const encodeUints = (list: bigint[]) => encodeUint(32n) + encodeUint(BigInt(list.length)) + list.map(encodeUint).join('')
+const TOKEN = '0x0f5d2fb29fb7d3cfee444a200298f468908cc942'
+const BENEFICIARY = '0x' + 'be'.repeat(20)
+const BLOCK = { height: 15000000, hash: '0x' + 'ab'.repeat(32) }
+
+/** An RPC that answers each function by its selector, and records the block every call is made at. */
+function fakeRpc(answers: Record<string, string | Error>) {
+  const blocks: unknown[] = []
+  const rpc = {
+    async call(method: string, params?: unknown[]) {
+      assert.equal(method, 'eth_call')
+      const [{ data }, block] = params as [{ data: string }, unknown]
+      blocks.push(block)
+      const answer = answers[data.slice(0, 10)]
+      if (answer instanceof Error) throw answer
+      return answer === undefined ? '0x' : '0x' + answer
+    },
   }
-  const v2 = await createVestingReader(network, { call: answer('v2') as never }).read(VESTING, 1)
-  assert.equal(v2.version, 2)
-  assert.ok(calls.includes(v2Abi.functions.getVestedPerPeriod.selector) || calls.length > 1)
-  const v1 = await createVestingReader(network, { call: answer('v1') as never }).read(VESTING, 1)
-  assert.equal(v1.version, 1)
-  await assert.rejects(createVestingReader(network, { call: answer('down') as never }).read(VESTING, 1), RpcConnectionError)
+  return { rpc: rpc as never, blocks }
+}
+
+const revert = () => new RpcError({ code: 3, message: 'execution reverted' })
+
+test('a version 1 contract is read with its hardcoded total, whole tokens, and a linear schedule', async () => {
+  const vesting = Object.keys(network.v1Totals)[0]
+  const { rpc, blocks } = fakeRpc({
+    [v1Abi.functions.duration.selector]: encodeUint(31536000n),
+    [v1Abi.functions.token.selector]: encodeAddress(TOKEN),
+    [v1Abi.functions.owner.selector]: encodeAddress(OWNER),
+    [v1Abi.functions.beneficiary.selector]: encodeAddress(BENEFICIARY),
+    [v1Abi.functions.revoked.selector]: encodeBool(false),
+    [v1Abi.functions.revocable.selector]: encodeBool(true),
+    [v1Abi.functions.released.selector]: encodeUint(1500n * ETH + ETH / 2n),
+    [v1Abi.functions.start.selector]: encodeUint(1600000000n),
+    [v1Abi.functions.cliff.selector]: encodeUint(1610000000n),
+  })
+  const fields = await createVestingReader(network, rpc).read(vesting, BLOCK)
+  assert.deepEqual(fields, {
+    version: 1,
+    token: TOKEN,
+    owner: OWNER,
+    beneficiary: BENEFICIARY,
+    revoked: false,
+    revocable: true,
+    released: 1500n,
+    start: 1600000000n,
+    cliff: 1610000000n,
+    periodDuration: 0n,
+    vestedPerPeriod: [],
+    duration: 31536000n,
+    paused: false,
+    pausable: false,
+    stop: 0n,
+    linear: true,
+    total: BigInt(network.v1Totals[vesting]),
+  })
+  // Every call at the block of that hash, not at its height.
+  assert.ok(blocks.length > 0 && blocks.every((block) => JSON.stringify(block) === JSON.stringify({ blockHash: BLOCK.hash })))
+})
+
+test('a version 2 contract, which reverts duration(), is read with an absolute cliff, a duration of its periods and their total', async () => {
+  const { rpc } = fakeRpc({
+    [v1Abi.functions.duration.selector]: revert(),
+    [v2Abi.functions.getToken.selector]: encodeAddress(TOKEN),
+    [v2Abi.functions.owner.selector]: encodeAddress(OWNER),
+    [v2Abi.functions.getBeneficiary.selector]: encodeAddress(BENEFICIARY),
+    [v2Abi.functions.getIsRevoked.selector]: encodeBool(false),
+    [v2Abi.functions.getIsRevocable.selector]: encodeBool(true),
+    [v2Abi.functions.getReleased.selector]: encodeUint(0n),
+    [v2Abi.functions.getStart.selector]: encodeUint(1700000000n),
+    [v2Abi.functions.getCliff.selector]: encodeUint(100n),
+    [v2Abi.functions.getPeriod.selector]: encodeUint(2592000n),
+    [v2Abi.functions.getVestedPerPeriod.selector]: encodeUints([1562n * ETH, 1563n * ETH]),
+    [v2Abi.functions.paused.selector]: encodeBool(true),
+    [v2Abi.functions.getIsPausable.selector]: encodeBool(true),
+    [v2Abi.functions.getStop.selector]: encodeUint(0n),
+    [v2Abi.functions.getIsLinear.selector]: encodeBool(false),
+  })
+  const fields = await createVestingReader(network, rpc).read(VESTING, BLOCK)
+  assert.equal(fields?.version, 2)
+  assert.equal(fields?.cliff, 1700000100n)
+  assert.equal(fields?.duration, 2592000n * 2n)
+  assert.deepEqual(fields?.vestedPerPeriod, [1562n, 1563n])
+  assert.equal(fields?.total, 3125n)
+  assert.equal(fields?.paused, true)
+  assert.equal(fields?.linear, false)
+})
+
+test('a contract with no code, or whose getters all revert, is not a vesting', async () => {
+  assert.equal(await createVestingReader(network, fakeRpc({}).rpc).read(VESTING, BLOCK), undefined)
+  const reverting = Object.fromEntries(
+    [...Object.values(v1Abi.functions), ...Object.values(v2Abi.functions)].map((f) => [f.selector, revert()])
+  )
+  assert.equal(await createVestingReader(network, fakeRpc(reverting).rpc).read(VESTING, BLOCK), undefined)
+})
+
+test('a failure that may pass on a retry fails the read', async () => {
+  const { rpc } = fakeRpc({ [v1Abi.functions.duration.selector]: new RpcConnectionError('socket hang up') })
+  await assert.rejects(createVestingReader(network, rpc).read(VESTING, BLOCK), RpcConnectionError)
+})
+
+test('a node that does not have the block yet is asked again', async () => {
+  let failures = 1
+  const { rpc } = fakeRpc({})
+  const lagging = {
+    async call(method: string, params?: unknown[]): Promise<unknown> {
+      if (failures-- > 0) throw new RpcError({ code: -32001, message: `block not found: hash ${BLOCK.hash}` })
+      return (rpc as { call: (method: string, params?: unknown[]) => Promise<unknown> }).call(method, params)
+    },
+  }
+  // No code: not a vesting, once the node answers.
+  assert.equal(await createVestingReader(network, lagging as never, 0).read(VESTING, BLOCK), undefined)
+  assert.equal(failures, -1)
 })

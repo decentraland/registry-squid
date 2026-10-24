@@ -7,6 +7,8 @@ import { VestingNetwork } from './config'
 /** What a vesting event needs from its block. */
 export interface VestingMeta {
   blockNumber: number
+  /** The block's hash: contracts are read at it, not at its height, which a reorg may reuse. */
+  blockHash: string
   /** Seconds. */
   timestamp: bigint
 }

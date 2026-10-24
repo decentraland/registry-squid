@@ -14,6 +14,7 @@ import { applyRentalsEvent, RentalsLoader, RentalsState, SAVE_ORDER } from './re
 import { getVestingNetwork } from './vesting/config'
 import { decodeVestingLog, VESTING_TOPICS, VestingEvent } from './vesting/events'
 import { createVestingReader } from './vesting/reader'
+import { vestingLogRequests } from './vesting/subscriptions'
 import { applyVestingEvent, VestingState } from './vesting/state'
 import { Vesting } from '../model'
 
@@ -27,17 +28,19 @@ const from = getStartBlock() ?? contracts.landStartBlock
 const vestingReader = createVestingReader(
   vestings,
   // A batch fails if one read does, and is retried from scratch: rate limits and timeouts are retried
-  // here instead, for as long as they last, as the portal's are.
+  // here instead, for as long as they last, as the portal's are. A request that hangs times out, so it
+  // is retried rather than holding the batch; the client logs each retry.
   new RpcClient({
     url: process.env.RPC_ENDPOINT_ETH || vestings.rpc,
     capacity: 20,
     rateLimit: 20,
+    requestTimeout: 30_000,
     retryAttempts: Number.MAX_SAFE_INTEGER,
     retrySchedule: [1000, 2000, 5000, 10000, 30000],
   })
 )
 
-const dataSource = new DataSourceBuilder()
+const builder = new DataSourceBuilder()
   .setPortal(portalSource(contracts.dataset))
   .setBlockRange({ from, to: getStopBlock() })
   .setFields({
@@ -58,21 +61,8 @@ const dataSource = new DataSourceBuilder()
     include: { transaction: true },
     range: { from: Math.max(from, contracts.rentalsStartBlock) },
   })
-  .addLog({
-    where: { address: [vestings.factory], topic0: [vestings.vestingCreatedTopic] },
-    range: { from: Math.max(from, vestings.factoryStartBlock) },
-  })
-  // The vesting contracts the snapshot knows, by address; any created after it, by topic: their events
-  // are kept only for contracts the factory created (VestingState).
-  .addLog({
-    where: { address: vestings.snapshot.addresses.length ? vestings.snapshot.addresses : [vestings.factory], topic0: VESTING_TOPICS },
-    range: { from: Math.max(from, vestings.factoryStartBlock), to: Math.max(vestings.snapshot.height, vestings.factoryStartBlock) },
-  })
-  .addLog({
-    where: { topic0: VESTING_TOPICS },
-    range: { from: Math.max(from, vestings.snapshot.height + 1, vestings.factoryStartBlock) },
-  })
-  .build()
+for (const request of vestingLogRequests(vestings, from)) builder.addLog(request)
+const dataSource = builder.build()
 
 // SQUID_SCHEMA, never DB_SCHEMA: promotion renames the deployment schema, and a search_path pinned
 // from the environment would go stale the moment it does.
@@ -134,7 +124,11 @@ run(
         if (address === vestings.factory || (VESTING_TOPICS.includes(log.topics[0]) && !OTHER_CONTRACTS.has(address))) {
           const vesting = decodeVestingLog(
             raw,
-            { blockNumber: block.header.number, timestamp: BigInt(Math.floor(block.header.timestamp / 1000)) },
+            {
+              blockNumber: block.header.number,
+              blockHash: block.header.hash,
+              timestamp: BigInt(Math.floor(block.header.timestamp / 1000)),
+            },
             vestings
           )
           if (vesting) items.push({ vesting })
@@ -179,6 +173,7 @@ run(
 
     for (const warning of land.warnings) logger.warn(warning)
     for (const error of rentals.errors) logger.warn(error)
+    for (const warning of vestingState.warnings) logger.warn(warning)
     const first = ctx.blocks[0].header.number
     const last = ctx.blocks[ctx.blocks.length - 1].header.number
     logger.info(

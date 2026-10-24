@@ -1,3 +1,4 @@
+import { FunctionResultDecodeError } from '@subsquid/evm-abi'
 import { RpcClient, RpcError } from '@subsquid/rpc-client'
 import * as v1Abi from '../../abi/TokenVesting'
 import * as v2Abi from '../../abi/PeriodicTokenVesting'
@@ -14,13 +15,55 @@ export function reverted(e: unknown): boolean {
 }
 
 /**
+ * A call that fails the same way whenever it is made: a revert, or an answer that is not what the
+ * function returns (the empty one of an address with no code). Anything else may pass on a retry.
+ */
+export function deterministic(e: unknown): boolean {
+  return reverted(e) || e instanceof FunctionResultDecodeError
+}
+
+/** A node that does not have the block yet: it lags the portal at the tip, and catches up. */
+const UNKNOWN_BLOCK = /block not found|unknown block|header not found/i
+const UNKNOWN_BLOCK_RETRIES = 10
+const UNKNOWN_BLOCK_DELAY_MS = 3000
+
+/**
+ * The RPC with every `eth_call` made at the block of that hash (EIP-1898), not at its height: at the
+ * unfinalized tip, the block at a height may be another one on the node. A node that does not have
+ * the block yet is asked again for a while; past that, the error fails the batch, which is retried.
+ */
+function atBlockHash(rpc: Pick<RpcClient, 'call'>, blockHash: string, delayMs: number): Pick<RpcClient, 'call'> {
+  return {
+    async call(method: string, params?: unknown[]) {
+      if (method !== 'eth_call' || !params) return rpc.call(method, params)
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await rpc.call(method, [params[0], { blockHash }])
+        } catch (e) {
+          if (!(e instanceof RpcError) || !UNKNOWN_BLOCK.test(e.message) || attempt >= UNKNOWN_BLOCK_RETRIES) throw e
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+        }
+      }
+    },
+  } as Pick<RpcClient, 'call'>
+}
+
+/**
  * Reads a vesting contract over RPC at the block the factory created it at, as the subgraph's
  * mapping does, at the end of that block: a release or pause later in the same block is already in
- * what it reads, and is then applied once more, as on the subgraph. Also as the mapping does: a contract that answers `duration()` is version 1 (TokenVesting), any other version 2
+ * what it reads, and is then applied once more, as on the subgraph. Also as the mapping does: a
+ * contract that answers `duration()` is version 1 (TokenVesting), any other version 2
  * (PeriodicTokenVesting). See schema/vesting.graphql for how each field is read.
+ *
+ * The factory creates a contract for anyone, with any implementation. One that cannot be read as
+ * either version (no code, or getters that revert) is not a vesting: it is answered as `undefined`
+ * and left out, rather than failing every batch from its block on. The subgraph would stop there.
  */
-export function createVestingReader(network: VestingNetwork, rpc: Pick<RpcClient, 'call'>): VestingReader {
-  const chain = { _chain: { client: rpc } }
+export function createVestingReader(
+  network: VestingNetwork,
+  rpc: Pick<RpcClient, 'call'>,
+  unknownBlockDelayMs = UNKNOWN_BLOCK_DELAY_MS
+): VestingReader {
 
   async function readV1(contract: v1Abi.Contract, vesting: string, duration: bigint): Promise<VestingFields> {
     const [token, owner, beneficiary, revoked, revocable, released, start, cliff] = await Promise.all([
@@ -95,17 +138,23 @@ export function createVestingReader(network: VestingNetwork, rpc: Pick<RpcClient
   }
 
   return {
-    async read(vesting, blockNumber) {
-      const block = { height: blockNumber }
+    async read(vesting, { height, hash }) {
+      const chain = { _chain: { client: atBlockHash(rpc, hash, unknownBlockDelayMs) } }
+      const block = { height }
       const v1 = new v1Abi.Contract(chain, block, vesting)
-      let duration: bigint
       try {
-        duration = await v1.duration()
+        let duration: bigint
+        try {
+          duration = await v1.duration()
+        } catch (e) {
+          if (!reverted(e)) throw e
+          return await readV2(new v2Abi.Contract(chain, block, vesting))
+        }
+        return await readV1(v1, vesting, duration)
       } catch (e) {
-        if (!reverted(e)) throw e
-        return readV2(new v2Abi.Contract(chain, block, vesting))
+        if (deterministic(e)) return undefined
+        throw e
       }
-      return readV1(v1, vesting, duration)
     },
   }
 }
