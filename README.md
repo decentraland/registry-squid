@@ -1,13 +1,14 @@
 # registry-squid
 
-A [Subsquid](https://docs.sqd.dev/) indexer for Decentraland's LAND permissions, LAND rentals and the
-third-party (linked wearables) registry.
+A [Subsquid](https://docs.sqd.dev/) indexer for Decentraland's LAND permissions, LAND rentals, the
+third-party (linked wearables) registry and the vesting contracts.
 
 | Module | Contracts | Chain |
 | --- | --- | --- |
 | LAND permissions | LANDRegistry, EstateRegistry | Ethereum |
 | Rentals | Rentals, plus `UpdateOperator` of LAND and Estate, the contracts it rents from | Ethereum |
 | Third-party registry | ThirdPartyRegistry | Polygon |
+| Vestings | Every TokenVesting and PeriodicTokenVesting the vesting factory created | Ethereum |
 
 ## Compatibility with the subgraphs
 
@@ -24,6 +25,7 @@ It replaces three subgraphs: [LAND-permissions-graph](https://github.com/decentr
     - `EstateHistory._prevEstateId` is `prevEstateId`, since field names cannot start with `_`.
     - The two subgraphs' `Count` entities are `RentalsCount` and `ThirdPartyCount`, since one squid has one GraphQL namespace.
     - The items of `ThirdPartyMetadata.contracts` are of type `LinkedContract`, not `LinkedContracts`, which matters only to fragments and `__typename`.
+- **Vestings as the vestings subgraph reads them.** It also replaces the vestings subgraph governance reads (deployment `QmV6EB6uq5548oCdcjYU3pz1jLwwkSoKUg6DY5dZrAgvTN`, whose source is not published: its schema and mapping were read from IPFS). Its values are kept as it computes them, oddities included: amounts in whole tokens, a version 1 release logged as the running total the contract emits, version 1 totals from a fixed list. `schema/vesting.graphql` lists them. `Vesting.vestedPerPeriod` is a list of strings, as the squid has no BigInt lists; it answers the same JSON.
 - **Lists of references.** `Estate.parcels`, `Data.parcel`, `Data.estate` and `ThirdPartyMetadata.contracts` are derived or stored inline, since a squid cannot store a list of references. They read the same fields; `contracts` is kept sorted by id, as graph-node returns it, and cannot be filtered on.
 
 ## History without time travel
@@ -48,6 +50,9 @@ Services that read the database directly should read the `v1_*` views, not the e
 | `v1_rental_assets` | Rented assets and whether they were claimed |
 | `v1_third_parties` | Third parties with their metadata |
 | `v1_third_party_root_history` | Merkle root and approval after every review |
+| `v1_vestings` | Every vesting contract the factory created, amounts in whole tokens |
+| `v1_vesting_releases` | Every release, one per vesting and timestamp |
+| `v1_vesting_pauses` | Every Paused / Unpaused of a vesting |
 
 ## Running locally
 
@@ -70,9 +75,20 @@ GQL_PORT=4350 npx squid-graphql-server --dialect thegraph
 | `ETHEREUM_FROM_BLOCK` | Start later than the contracts' first block, to check one module in isolation (LAND state will be partial) |
 | `ETHEREUM_PROMETHEUS_PORT`, `POLYGON_PROMETHEUS_PORT` | Metrics ports; `3000` and `3001` by default |
 | `SQUID_SCHEMA` | The deployment schema, used to name each processor's state schema |
+| `RPC_ENDPOINT_ETH` | Ethereum RPC for reading new vesting contracts; the network's public Decentraland RPC by default. It must take a block by hash (EIP-1898) and report a call that reverts as one (code 3, or "revert" in the message), as geth and the default do: version 2 contracts are told apart by `duration()` reverting |
 
-The squid makes no RPC calls: LAND coordinates are decoded from the token id, and every other value
-comes from event logs.
+The only RPC calls read each vesting contract once, at the block the factory created it, as the
+subgraph does: its parameters are not in any event. Everything else comes from event logs, and LAND
+coordinates are decoded from the token id.
+
+The processor reads the vesting contracts it knows by address, from a snapshot of the factory's
+contracts (`src/ethereum/vesting/snapshot-<dataset>.json`), and anything past the snapshot's height
+by topic, keeping only contracts the factory created. An old snapshot is still correct, only slower
+to index past it: past the snapshot every contract emitting those events is read (`Paused` and
+`Unpaused` are OpenZeppelin's, so on the SQD portal that is every pausable contract on mainnet), and
+each one costs a lookup; on chain-lake only Decentraland's contracts are there. Refresh it before a
+reindex: `RPC_ENDPOINT_ETH=<url> npm run vestings:snapshot` refreshes it (`ETHEREUM_CHAIN_ID`
+picks the network).
 
 ## Comparing with a subgraph
 
