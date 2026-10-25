@@ -95,6 +95,12 @@ function rentableUpdate(ev: LandEvent): RentalsEvent | undefined {
 const RENTABLE_CONTRACTS = new Set([contracts.landRegistry, contracts.estateRegistry])
 const OTHER_CONTRACTS = new Set([contracts.landRegistry, contracts.estateRegistry, contracts.rentals])
 
+/**
+ * The ids of the vestings in the store (about a thousand rows), read once, and every one created since (VestingState adds
+ * them). A vesting created in a block a reorg drops stays in it, which only costs a store lookup.
+ */
+let knownVestings: Set<string> | undefined
+
 function storeLoader(store: Store): RentalsLoader {
   return { get: (cls, id) => store.get(cls, id) }
 }
@@ -158,7 +164,8 @@ run(
     const landEvents = items.flatMap((i) => (i.land ? [i.land] : []))
     const land = await loadLandState(ctx.store, landEvents, contracts.estateRegistry, contracts.emptyMetadataReadsNull)
     const rentals = new RentalsState(storeLoader(ctx.store))
-    const vestingState = new VestingState({ get: (id) => ctx.store.get(Vesting, id) })
+    knownVestings ??= new Set((await ctx.store.find(Vesting, {})).map((v) => v.id))
+    const vestingState = new VestingState({ get: (id) => ctx.store.get(Vesting, id) }, knownVestings)
     for (const item of items) {
       if (item.land) applyLandEvent(land, item.land)
       if (item.rentals) await applyRentalsEvent(rentals, item.rentals)

@@ -50,7 +50,7 @@ Services that read the database directly should read the `v1_*` views, not the e
 | `v1_rental_assets` | Rented assets and whether they were claimed |
 | `v1_third_parties` | Third parties with their metadata |
 | `v1_third_party_root_history` | Merkle root and approval after every review |
-| `v1_vestings` | Every vesting contract the factory created, amounts in whole tokens |
+| `v1_vestings` | Every vesting contract the factory created, amounts in whole tokens. Anyone can create one, with any token: filter by `token` for MANA's |
 | `v1_vesting_releases` | Every release, one per vesting and timestamp |
 | `v1_vesting_pauses` | Every Paused / Unpaused of a vesting |
 
@@ -75,7 +75,7 @@ GQL_PORT=4350 npx squid-graphql-server --dialect thegraph
 | `ETHEREUM_FROM_BLOCK` | Start later than the contracts' first block, to check one module in isolation (LAND state will be partial) |
 | `ETHEREUM_PROMETHEUS_PORT`, `POLYGON_PROMETHEUS_PORT` | Metrics ports; `3000` and `3001` by default |
 | `SQUID_SCHEMA` | The deployment schema, used to name each processor's state schema |
-| `RPC_ENDPOINT_ETH` | Ethereum RPC for reading new vesting contracts; the network's public Decentraland RPC by default. It must take a block by hash (EIP-1898) and report a call that reverts as one (code 3, or "revert" in the message), as geth and the default do: version 2 contracts are told apart by `duration()` reverting |
+| `RPC_ENDPOINT_ETH` | Ethereum RPC for reading new vesting contracts; the network's public Decentraland RPC by default. It must be an archive node (a reindex reads every vesting at the block that created it), take a block by hash (EIP-1898), and report a call that fails as geth does (code 3, or -32000 with the VM error): version 2 contracts are told apart by `duration()` reverting |
 
 The only RPC calls read each vesting contract once, at the block the factory created it, as the
 subgraph does: its parameters are not in any event. Everything else comes from event logs, and LAND

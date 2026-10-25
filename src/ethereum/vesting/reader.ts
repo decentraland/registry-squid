@@ -15,11 +15,23 @@ export function reverted(e: unknown): boolean {
 }
 
 /**
- * A call that fails the same way whenever it is made: a revert, or an answer that is not what the
- * function returns (the empty one of an address with no code). Anything else may pass on a retry.
+ * Failures of the node rather than of the call: they may pass when the call is made again. A node
+ * that is not an archive node (`missing trie node`) fails every historical read until it is replaced.
+ */
+const NODE_FAILURE =
+  /rate limit|too many requests|limit exceeded|timeout|timed out|block not found|unknown block|header not found|missing trie node|historical state|state.*not available|pruned|internal error|busy|unavailable|overloaded|capacity|connection/i
+
+/**
+ * A call that fails the same way whenever it is made, so the contract is not a vesting: an answer
+ * that is not what the function returns, or any error the node reports for executing the call (code 3,
+ * or geth's -32000 with the bare VM error: a revert, `out of gas`, `invalid opcode`, `stack underflow`
+ * and the like) that is not a failure of the node itself. A transport failure is never one.
  */
 export function deterministic(e: unknown): boolean {
-  return reverted(e) || e instanceof FunctionResultDecodeError
+  if (e instanceof FunctionResultDecodeError) return true
+  if (!(e instanceof RpcError)) return false
+  if (e.code === 3) return true
+  return (e.code === -32000 || e.code === -32015) && !NODE_FAILURE.test(e.message)
 }
 
 /** A node that does not have the block yet: it lags the portal at the tip, and catches up. */
@@ -56,8 +68,9 @@ function atBlockHash(rpc: Pick<RpcClient, 'call'>, blockHash: string, delayMs: n
  * (PeriodicTokenVesting). See schema/vesting.graphql for how each field is read.
  *
  * The factory creates a contract for anyone, with any implementation. One that cannot be read as
- * either version (no code, or getters that revert) is not a vesting: it is answered as `undefined`
- * and left out, rather than failing every batch from its block on. The subgraph would stop there.
+ * either version (an implementation with no code, getters that revert or fail in any other way the
+ * node reports for the call) is not a vesting: it is answered as `undefined` and left out, rather than
+ * failing every batch from its block on. The subgraph would stop there.
  */
 export function createVestingReader(
   network: VestingNetwork,
@@ -152,8 +165,12 @@ export function createVestingReader(
         }
         return await readV1(v1, vesting, duration)
       } catch (e) {
-        if (deterministic(e)) return undefined
-        throw e
+        if (!deterministic(e)) throw e
+        // The clone exists at the block that created it: a node that answers it has no code there is
+        // wrong (behind a load balancer, say), and the read is failed, to be made again, not dropped.
+        const code = await rpc.call<string>('eth_getCode', [vesting, { blockHash: hash }])
+        if (!code || code === '0x') throw new Error(`The node has no code for ${vesting} at ${hash}, which created it`)
+        return undefined
       }
     },
   }

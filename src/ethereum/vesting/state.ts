@@ -43,11 +43,19 @@ export class VestingState {
   readonly warnings: string[] = []
   private readonly missing = new Set<string>()
 
-  constructor(private readonly loader: { get(id: string): Promise<Vesting | undefined> }) {}
+  /**
+   * @param known Every vesting id the store may hold, or more: past the snapshot, any pausable
+   * contract's events are read, and those of an id not in it are left out without a store lookup.
+   * Vestings created here are added to it.
+   */
+  constructor(
+    private readonly loader: { get(id: string): Promise<Vesting | undefined> },
+    private readonly known?: Set<string>
+  ) {}
 
   async get(id: string): Promise<Vesting | undefined> {
     if (this.vestings.has(id)) return this.vestings.get(id)
-    if (this.missing.has(id)) return undefined
+    if (this.missing.has(id) || (this.known && !this.known.has(id))) return undefined
     const vesting = await this.loader.get(id)
     if (vesting) this.vestings.set(id, vesting)
     else this.missing.add(id)
@@ -55,6 +63,7 @@ export class VestingState {
   }
 
   create(vesting: Vesting): void {
+    this.known?.add(vesting.id)
     this.missing.delete(vesting.id)
     this.vestings.set(vesting.id, vesting)
   }

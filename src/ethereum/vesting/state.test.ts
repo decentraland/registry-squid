@@ -8,7 +8,7 @@ import { Vesting } from '../../model'
 import { VESTING_NETWORKS } from './config'
 import { decodeVestingLog, VestingEvent } from './events'
 import { RpcConnectionError, RpcError } from '@subsquid/rpc-client'
-import { createVestingReader, reverted } from './reader'
+import { createVestingReader, deterministic, reverted } from './reader'
 import { applyVestingEvent, VestingFields, VestingReader, VestingState } from './state'
 
 const network = VESTING_NETWORKS['ethereum-mainnet']
@@ -164,6 +164,16 @@ test('a vesting created in an earlier batch is read from the store', async () =>
   assert.equal(stored.released, 3n)
 })
 
+test('the events of a contract no known vesting has are left out without asking the store', async () => {
+  let lookups = 0
+  const known = new Set([VESTING])
+  const state = new VestingState({ get: async () => (lookups++, undefined) }, known)
+  await applyVestingEvent(state, { ...at(2, 200), kind: 'Paused', vesting: '0x' + 'ee'.repeat(20) }, { read: async () => v1Fields })
+  assert.equal(lookups, 0)
+  await applyVestingEvent(state, { ...at(3, 300), kind: 'VestingCreated', vesting: '0x' + 'cc'.repeat(20) }, { read: async () => v1Fields })
+  assert.ok(known.has('0x' + 'cc'.repeat(20)))
+})
+
 test('logs of the factory other than creations, and of unrelated events, are not vesting events', () => {
   assert.equal(decodeVestingLog({ address: network.factory, topics: [v1Abi.events.Revoked.topic], data: '0x' }, at(1, 1), network), undefined)
   assert.equal(decodeVestingLog({ address: VESTING, topics: ['0x' + '12'.repeat(32)], data: '0x' }, at(1, 1), network), undefined)
@@ -192,11 +202,15 @@ const TOKEN = '0x0f5d2fb29fb7d3cfee444a200298f468908cc942'
 const BENEFICIARY = '0x' + 'be'.repeat(20)
 const BLOCK = { height: 15000000, hash: '0x' + 'ab'.repeat(32) }
 
-/** An RPC that answers each function by its selector, and records the block every call is made at. */
-function fakeRpc(answers: Record<string, string | Error>) {
+/**
+ * An RPC that answers each function by its selector, and records the block every call is made at. The
+ * clone has code unless `code` says otherwise.
+ */
+function fakeRpc(answers: Record<string, string | Error>, code = '0x363d3d373d3d3d363d73') {
   const blocks: unknown[] = []
   const rpc = {
     async call(method: string, params?: unknown[]) {
+      if (method === 'eth_getCode') return code
       assert.equal(method, 'eth_call')
       const [{ data }, block] = params as [{ data: string }, unknown]
       blocks.push(block)
@@ -283,6 +297,30 @@ test('a contract with no code, or whose getters all revert, is not a vesting', a
   assert.equal(await createVestingReader(network, fakeRpc(reverting).rpc).read(VESTING, BLOCK), undefined)
 })
 
+test('a clone whose implementation fails in a way other than a revert is not a vesting either', async () => {
+  for (const message of ['out of gas', 'invalid opcode: INVALID', 'stack underflow (0 <=> 1)', 'invalid jump destination']) {
+    const { rpc } = fakeRpc({ [v1Abi.functions.duration.selector]: new RpcError({ code: -32000, message }) })
+    assert.equal(await createVestingReader(network, rpc).read(VESTING, BLOCK), undefined, message)
+  }
+})
+
+test('an empty answer from a node with no code for the clone, at the block that created it, fails the read', async () => {
+  await assert.rejects(createVestingReader(network, fakeRpc({}, '0x').rpc).read(VESTING, BLOCK), /no code/)
+})
+
+test('only failures of the call, not of the node, are deterministic', () => {
+  assert.equal(deterministic(new RpcError({ code: 3, message: 'execution reverted' })), true)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'out of gas' })), true)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'invalid opcode: INVALID' })), true)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'header not found' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'missing trie node 0xab (path )' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'request timed out' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32005, message: 'limit exceeded' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32603, message: 'internal error' })), false)
+  assert.equal(deterministic(new RpcConnectionError('socket hang up')), false)
+  assert.equal(deterministic(new Error('out of gas')), false)
+})
+
 test('a failure that may pass on a retry fails the read', async () => {
   const { rpc } = fakeRpc({ [v1Abi.functions.duration.selector]: new RpcConnectionError('socket hang up') })
   await assert.rejects(createVestingReader(network, rpc).read(VESTING, BLOCK), RpcConnectionError)
@@ -299,5 +337,6 @@ test('a node that does not have the block yet is asked again', async () => {
   }
   // No code: not a vesting, once the node answers.
   assert.equal(await createVestingReader(network, lagging as never, 0).read(VESTING, BLOCK), undefined)
-  assert.equal(failures, -1)
+  // Asked again after the failure, and then on.
+  assert.ok(failures < 0)
 })
