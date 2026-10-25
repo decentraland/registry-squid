@@ -1,5 +1,5 @@
-import { toBytes } from '../../common/hex'
-import { PausedLog, ReleaseLog, Vesting } from '../../model'
+import { toBytes } from '../common/hex'
+import { PausedLog, ReleaseLog, Vesting } from '../model'
 import { VestingEvent } from './events'
 
 /** A vesting contract's fields as the subgraph reads them when the factory creates it. */

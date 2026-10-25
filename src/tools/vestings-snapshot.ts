@@ -1,11 +1,11 @@
 import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { RpcClient } from '@subsquid/rpc-client'
-import { getVestingNetwork } from '../ethereum/vesting/config'
+import { getVestingNetwork } from '../vesting/config'
 
 /**
  * Writes the vesting contracts the factory created up to the finalized head, for the network
- * `ETHEREUM_CHAIN_ID` names (mainnet by default), into `src/ethereum/vesting/snapshot-<dataset>.json`.
+ * `ETHEREUM_CHAIN_ID` names (mainnet by default), into `src/vesting/snapshot-<dataset>.json`.
  * The processor reads those contracts' events by address, and anything after the snapshot by topic,
  * so an old snapshot is still correct, only slower to index past.
  *
@@ -25,7 +25,7 @@ async function main() {
     ])
     for (const log of logs) addresses.add('0x' + log.topics[1].slice(-40).toLowerCase())
   }
-  const file = join(__dirname, '..', '..', 'src', 'ethereum', 'vesting', `snapshot-${network.dataset}.json`)
+  const file = join(__dirname, '..', '..', 'src', 'vesting', `snapshot-${network.dataset}.json`)
   writeFileSync(file, JSON.stringify({ height: head, addresses: [...addresses].sort() }, null, 2) + '\n')
   console.log(`${addresses.size} vesting contracts up to block ${head} written to ${file}`)
 }

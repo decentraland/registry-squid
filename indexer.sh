@@ -86,9 +86,9 @@ else
   echo "Creating schema $NEW_SCHEMA_NAME and user $NEW_DB_USER"
   DEPLOYMENT_PASSWORD=$(deployment_password "$NEW_DB_USER")
 
-  # The processors' state schemas, as src/ethereum/main.ts and src/polygon/main.ts name them: keep
-  # the names in step.
-  STATE_SCHEMAS="ethereum_processor_$NEW_SCHEMA_NAME polygon_processor_$NEW_SCHEMA_NAME"
+  # The processors' state schemas, as src/ethereum/main.ts, src/polygon/main.ts and src/vesting/main.ts
+  # name them: keep the names in step.
+  STATE_SCHEMAS="ethereum_processor_$NEW_SCHEMA_NAME polygon_processor_$NEW_SCHEMA_NAME vesting_processor_$NEW_SCHEMA_NAME"
   STATE=""
   for SCHEMA in $STATE_SCHEMAS; do
     STATE="$STATE

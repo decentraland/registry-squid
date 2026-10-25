@@ -1,8 +1,8 @@
 import { FunctionResultDecodeError } from '@subsquid/evm-abi'
 import { RpcClient, RpcError } from '@subsquid/rpc-client'
-import * as v1Abi from '../../abi/TokenVesting'
-import * as v2Abi from '../../abi/PeriodicTokenVesting'
-import { lower } from '../../common/hex'
+import * as v1Abi from '../abi/TokenVesting'
+import * as v2Abi from '../abi/PeriodicTokenVesting'
+import { lower } from '../common/hex'
 import { VestingNetwork } from './config'
 import { tokens, VestingFields, VestingReader } from './state'
 

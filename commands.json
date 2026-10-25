@@ -22,12 +22,16 @@
       "cmd": ["squid-typeorm-migration", "generate"]
     },
     "process:ethereum": {
-      "description": "Run the Ethereum processor (LAND permissions, rentals and vestings)",
+      "description": "Run the Ethereum processor (LAND permissions and rentals)",
       "cmd": ["node", "--require=dotenv/config", "lib/ethereum/main.js"]
     },
     "process:polygon": {
       "description": "Run the Polygon processor (third-party registry)",
       "cmd": ["node", "--require=dotenv/config", "lib/polygon/main.js"]
+    },
+    "process:vesting": {
+      "description": "Run the vesting processor (the vesting factory and its contracts)",
+      "cmd": ["node", "--require=dotenv/config", "lib/vesting/main.js"]
     },
     "vestings:snapshot": {
       "description": "Refresh the snapshot of the vesting factory's contracts (RPC_ENDPOINT_ETH, ETHEREUM_CHAIN_ID)",
@@ -41,6 +45,10 @@
     "process:prod:polygon": {
       "hidden": true,
       "cmd": ["node", "lib/polygon/main.js"]
+    },
+    "process:prod:vesting": {
+      "hidden": true,
+      "cmd": ["node", "lib/vesting/main.js"]
     },
     "serve": {
       "description": "Start the GraphQL API with The Graph's query dialect",

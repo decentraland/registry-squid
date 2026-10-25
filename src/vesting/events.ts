@@ -1,7 +1,7 @@
-import * as factoryAbi from '../../abi/VestingFactory'
-import * as v1Abi from '../../abi/TokenVesting'
-import * as v2Abi from '../../abi/PeriodicTokenVesting'
-import { lower } from '../../common/hex'
+import * as factoryAbi from '../abi/VestingFactory'
+import * as v1Abi from '../abi/TokenVesting'
+import * as v2Abi from '../abi/PeriodicTokenVesting'
+import { lower } from '../common/hex'
 import { VestingNetwork } from './config'
 
 /** What a vesting event needs from its block. */

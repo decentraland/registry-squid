@@ -63,6 +63,7 @@ export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=registry DB_USER=postgres DB_PASS=
 npx squid-typeorm-migration apply
 node lib/ethereum/main.js   # LAND permissions and rentals
 node lib/polygon/main.js    # third-party registry
+node lib/vesting/main.js    # vesting factory and contracts
 GQL_PORT=4350 npx squid-graphql-server --dialect thegraph
 ```
 
@@ -71,9 +72,9 @@ GQL_PORT=4350 npx squid-graphql-server --dialect thegraph
 | `SQD_PORTAL_URL` | Portal host; defaults to the public `https://portal.sqd.dev` |
 | `SQD_PORTAL_API_KEY` | Sent as `x-api-key` when set |
 | `ETHEREUM_CHAIN_ID`, `POLYGON_CHAIN_ID` | `1` / `11155111` and `137` / `80002`; mainnet by default |
-| `ETHEREUM_STOP_BLOCK`, `POLYGON_STOP_BLOCK` | Stop at a block, for bounded runs and comparisons |
-| `ETHEREUM_FROM_BLOCK` | Start later than the contracts' first block, to check one module in isolation (LAND state will be partial) |
-| `ETHEREUM_PROMETHEUS_PORT`, `POLYGON_PROMETHEUS_PORT` | Metrics ports; `3000` and `3001` by default |
+| `ETHEREUM_STOP_BLOCK`, `POLYGON_STOP_BLOCK` | Stop at a block, for bounded runs and comparisons; the Ethereum one stops the vesting processor too |
+| `ETHEREUM_FROM_BLOCK` | Start later than the contracts' first block, to check one module in isolation (LAND state will be partial); it applies to the vesting processor too |
+| `ETHEREUM_PROMETHEUS_PORT`, `POLYGON_PROMETHEUS_PORT`, `VESTING_PROMETHEUS_PORT` | Metrics ports; `3000`, `3001` and `3002` by default |
 | `SQUID_SCHEMA` | The deployment schema, used to name each processor's state schema |
 | `RPC_ENDPOINT_ETH` | Ethereum RPC for reading new vesting contracts; the network's public Decentraland RPC by default. It must be an archive node (a reindex reads every vesting at the block that created it), take a block by hash (EIP-1898), and report a call that fails as geth does (code 3, or -32000 with the VM error): version 2 contracts are told apart by `duration()` reverting |
 
@@ -81,8 +82,12 @@ The only RPC calls read each vesting contract once, at the block the factory cre
 subgraph does: its parameters are not in any event. Everything else comes from event logs, and LAND
 coordinates are decoded from the token id.
 
-The processor reads the vesting contracts it knows by address, from a snapshot of the factory's
-contracts (`src/ethereum/vesting/snapshot-<dataset>.json`), and anything past the snapshot's height
+The vesting contracts have a processor of their own, which reads Ethereum apart from the one for
+LAND, estates and rentals: the factory creates contracts for anyone, and each one is read over RPC,
+so whatever such a contract makes fail stops the vestings alone, as it would stop the subgraph.
+
+The vesting processor reads the vesting contracts it knows by address, from a snapshot of the factory's
+contracts (`src/vesting/snapshot-<dataset>.json`), and anything past the snapshot's height
 by topic, keeping only contracts the factory created. An old snapshot is still correct, only slower
 to index past it: past the snapshot every contract emitting those events is read (`Paused` and
 `Unpaused` are OpenZeppelin's, so on the SQD portal that is every pausable contract on mainnet), and

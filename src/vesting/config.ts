@@ -1,4 +1,4 @@
-import { getEthereumContracts } from '../config'
+import { getEthereumContracts } from '../ethereum/config'
 import mainnetSnapshot from './snapshot-ethereum-mainnet.json'
 import sepoliaSnapshot from './snapshot-ethereum-sepolia.json'
 import mainnetV1Totals from './v1-totals.json'

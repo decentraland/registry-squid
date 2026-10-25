@@ -13,5 +13,7 @@ deploy:
       cmd: ["sqd", "process:prod:ethereum"]
     - name: polygon-processor
       cmd: ["sqd", "process:prod:polygon"]
+    - name: vesting-processor
+      cmd: ["sqd", "process:prod:vesting"]
   api:
     cmd: ["sqd", "serve:prod"]
