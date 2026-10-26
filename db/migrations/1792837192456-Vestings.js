@@ -20,9 +20,7 @@ module.exports = class Vestings1792837192456 {
     async down(db) {
         await db.query(`ALTER TABLE "paused_log" DROP CONSTRAINT "FK_c374fb15a41a86fb1ae0664a454"`)
         await db.query(`ALTER TABLE "release_log" DROP CONSTRAINT "FK_edb88ff1e546cb1c2f93193650d"`)
-        await db.query(`DROP INDEX "public"."idx_paused_log_vesting_3cd287fd"`)
         await db.query(`DROP TABLE "paused_log"`)
-        await db.query(`DROP INDEX "public"."idx_release_log_vesting_2f02524e"`)
         await db.query(`DROP TABLE "release_log"`)
         await db.query(`DROP TABLE "vesting"`)
     }

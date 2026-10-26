@@ -14,8 +14,6 @@ export interface VestingNetwork {
    * this block, which the subgraph, and so governance, never shows.
    */
   factoryStartBlock: number
-  /** `VestingCreated(address indexed, bytes32)` */
-  vestingCreatedTopic: string
   /** The public RPC the network's contracts are read with when RPC_ENDPOINT_ETH is not set. */
   rpc: string
   /** The vesting contracts the factory created up to `height` (`npm run vestings:snapshot`). */
@@ -27,15 +25,12 @@ export interface VestingNetwork {
   v1Totals: Record<string, string>
 }
 
-const VESTING_CREATED = '0xeaa996f76fa9fcacd351918a2a275ae6d45845f79256ffbe8c0a87ca608e9970'
-
 /** By dataset, as `getEthereumContracts` names the network. */
 export const VESTING_NETWORKS: Record<string, VestingNetwork> = {
   'ethereum-mainnet': {
     dataset: 'ethereum-mainnet',
     factory: '0xe357273545c152f07afe2c38257b7b653fd3f6d0',
     factoryStartBlock: 12732617,
-    vestingCreatedTopic: VESTING_CREATED,
     rpc: 'https://rpc.decentraland.org/mainnet',
     snapshot: mainnetSnapshot,
     v1Totals: mainnetV1Totals,
@@ -44,7 +39,6 @@ export const VESTING_NETWORKS: Record<string, VestingNetwork> = {
     dataset: 'ethereum-sepolia',
     factory: '0x71c84760df0537f7db286274817462dc2e6c1366',
     factoryStartBlock: 3831258,
-    vestingCreatedTopic: VESTING_CREATED,
     rpc: 'https://rpc.decentraland.org/sepolia',
     snapshot: sepoliaSnapshot,
     v1Totals: {},

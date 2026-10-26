@@ -1,6 +1,7 @@
 import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { RpcClient } from '@subsquid/rpc-client'
+import * as factoryAbi from '../abi/VestingFactory'
 import { getVestingNetwork } from '../vesting/config'
 
 /**
@@ -21,7 +22,7 @@ async function main() {
   for (let from = network.factoryStartBlock; from <= head; from += RANGE) {
     const to = Math.min(from + RANGE - 1, head)
     const logs = await rpc.call<{ topics: string[] }[]>('eth_getLogs', [
-      { address: network.factory, topics: [network.vestingCreatedTopic], fromBlock: '0x' + from.toString(16), toBlock: '0x' + to.toString(16) },
+      { address: network.factory, topics: [factoryAbi.events.VestingCreated.topic], fromBlock: '0x' + from.toString(16), toBlock: '0x' + to.toString(16) },
     ])
     for (const log of logs) addresses.add('0x' + log.topics[1].slice(-40).toLowerCase())
   }

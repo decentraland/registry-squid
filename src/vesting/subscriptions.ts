@@ -1,4 +1,5 @@
 import { VestingNetwork } from './config'
+import * as factoryAbi from '../abi/VestingFactory'
 import { VESTING_TOPICS } from './events'
 
 export interface LogRequest {
@@ -14,7 +15,7 @@ export interface LogRequest {
  */
 export function vestingLogRequests(network: VestingNetwork, from: number): LogRequest[] {
   const start = Math.max(from, network.factoryStartBlock)
-  const requests: LogRequest[] = [{ where: { address: [network.factory], topic0: [network.vestingCreatedTopic] }, range: { from: start } }]
+  const requests: LogRequest[] = [{ where: { address: [network.factory], topic0: [factoryAbi.events.VestingCreated.topic] }, range: { from: start } }]
   if (network.snapshot.addresses.length && start <= network.snapshot.height) {
     requests.push({
       where: { address: network.snapshot.addresses, topic0: VESTING_TOPICS },

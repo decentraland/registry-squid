@@ -36,7 +36,7 @@
     "vestings:snapshot": {
       "description": "Refresh the snapshot of the vesting factory's contracts (RPC_ENDPOINT_ETH, ETHEREUM_CHAIN_ID)",
       "deps": ["build"],
-      "cmd": ["node", "lib/tools/vestings-snapshot.js"]
+      "cmd": ["node", "--require=dotenv/config", "lib/tools/vestings-snapshot.js"]
     },
     "process:prod:ethereum": {
       "hidden": true,

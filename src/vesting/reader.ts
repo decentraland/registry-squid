@@ -31,6 +31,8 @@ export function deterministic(e: unknown): boolean {
   if (e instanceof FunctionResultDecodeError) return true
   if (!(e instanceof RpcError)) return false
   if (e.code === 3) return true
+  // geth's limit on how long a call runs: a contract that runs too long runs too long every time.
+  if (/execution aborted/i.test(e.message)) return true
   return (e.code === -32000 || e.code === -32015) && !NODE_FAILURE.test(e.message)
 }
 
@@ -166,10 +168,12 @@ export function createVestingReader(
         return await readV1(v1, vesting, duration)
       } catch (e) {
         if (!deterministic(e)) throw e
-        // The clone exists at the block that created it: a node that answers it has no code there is
-        // wrong (behind a load balancer, say), and the read is failed, to be made again, not dropped.
-        const code = await rpc.call<string>('eth_getCode', [vesting, { blockHash: hash }])
-        if (!code || code === '0x') throw new Error(`The node has no code for ${vesting} at ${hash}, which created it`)
+        // Only an answer from a node that holds the block counts: one that does not (behind a load
+        // balancer, say) may answer a call with nothing. The read is then failed, to be made again,
+        // not dropped. A clone with no code at a block the node holds is not a vesting: its
+        // initializer may have destroyed it in the transaction that created it.
+        const held = await rpc.call<unknown>('eth_getBlockByHash', [hash, false])
+        if (!held) throw new Error(`The node does not hold block ${hash}, which created ${vesting}`)
         return undefined
       }
     },
