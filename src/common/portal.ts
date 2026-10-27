@@ -9,7 +9,8 @@ export interface PortalSource {
  * The SQD Network Portal stream for a dataset (`ethereum-mainnet`, `polygon-mainnet`, ...).
  *
  * This squid filters a handful of contracts, so its queries stay far below the public portal's
- * size cap and it needs no key. `SQD_PORTAL_URL` points it at another portal (the shared one, or a
+ * size cap and it needs no key. The vesting processor also reads, past its snapshot, every contract's
+ * logs with a vesting event's topic (`src/vesting/subscriptions.ts`): a few hundred a week on mainnet. `SQD_PORTAL_URL` points it at another portal (the shared one, or a
  * self-hosted one); `SQD_PORTAL_API_KEY` is sent only when set.
  */
 export function portalSource(dataset: string): PortalSource {

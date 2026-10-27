@@ -29,6 +29,15 @@
       "description": "Run the Polygon processor (third-party registry)",
       "cmd": ["node", "--require=dotenv/config", "lib/polygon/main.js"]
     },
+    "process:vesting": {
+      "description": "Run the vesting processor (the vesting factory and its contracts)",
+      "cmd": ["node", "--require=dotenv/config", "lib/vesting/main.js"]
+    },
+    "vestings:snapshot": {
+      "description": "Refresh the snapshot of the vesting factory's contracts (RPC_ENDPOINT_ETH, ETHEREUM_CHAIN_ID)",
+      "deps": ["build"],
+      "cmd": ["node", "--require=dotenv/config", "lib/tools/vestings-snapshot.js"]
+    },
     "process:prod:ethereum": {
       "hidden": true,
       "cmd": ["node", "lib/ethereum/main.js"]
@@ -36,6 +45,10 @@
     "process:prod:polygon": {
       "hidden": true,
       "cmd": ["node", "lib/polygon/main.js"]
+    },
+    "process:prod:vesting": {
+      "hidden": true,
+      "cmd": ["node", "lib/vesting/main.js"]
     },
     "serve": {
       "description": "Start the GraphQL API with The Graph's query dialect",
