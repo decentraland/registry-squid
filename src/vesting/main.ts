@@ -1,5 +1,4 @@
 import { DataSourceBuilder } from '@subsquid/evm-stream'
-import { RpcClient } from '@subsquid/rpc-client'
 import { PrometheusServer, run } from '@subsquid/batch-processor'
 import { TypeormDatabase } from '@subsquid/typeorm-store'
 import { createLogger } from '@subsquid/logger'
@@ -8,7 +7,7 @@ import { getStartBlock, getStopBlock } from '../ethereum/config'
 import { Vesting } from '../model'
 import { getVestingNetwork } from './config'
 import { decodeVestingLog, VestingEvent } from './events'
-import { createVestingReader } from './reader'
+import { createVestingReader, VestingRpcClient } from './reader'
 import { vestingLogRequests } from './subscriptions'
 import { applyVestingEvent, VestingState } from './state'
 
@@ -28,7 +27,7 @@ const vestingReader = createVestingReader(
   // A batch fails if one read does, and is retried from scratch: rate limits and timeouts are retried
   // here instead, for as long as they last, as the portal's are. A request that hangs times out, so it
   // is retried rather than holding the batch; the client logs each retry.
-  new RpcClient({
+  new VestingRpcClient({
     url: process.env.RPC_ENDPOINT_ETH || vestings.rpc,
     capacity: 20,
     rateLimit: 20,

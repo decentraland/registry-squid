@@ -15,6 +15,17 @@ export function reverted(e: unknown): boolean {
 }
 
 /**
+ * The RPC client for the vesting reads. `RpcClient` retries an error whose text says `rate limit` or
+ * `timeout`, whatever its code, so a contract that runs `revert("rate limit")` would be read again
+ * forever and hold the processor at its block. A revert is the contract's answer: never retried.
+ */
+export class VestingRpcClient extends RpcClient {
+  isConnectionError(err: Error): boolean {
+    return !reverted(err) && super.isConnectionError(err)
+  }
+}
+
+/**
  * A node that does not have the block yet: it lags the portal at the tip, and catches up. Geth says
  * `header not found` or `header for hash not found`, erigon `block 0x… not found`.
  */
@@ -42,7 +53,8 @@ const NODE_FAILURE =
 export function deterministic(e: unknown): boolean {
   if (e instanceof FunctionResultDecodeError) return true
   if (!(e instanceof RpcError)) return false
-  if (e.code === 3) return true
+  // First: a revert's reason is the contract's text, and may say anything a node failure says.
+  if (reverted(e)) return true
   if (/execution aborted/i.test(e.message)) return true
   return (e.code === -32000 || e.code === -32015) && !UNKNOWN_BLOCK.test(e.message) && !NODE_FAILURE.test(e.message)
 }
@@ -60,7 +72,7 @@ function atBlockHash(rpc: Pick<RpcClient, 'call'>, blockHash: string, delayMs: n
         try {
           return await rpc.call(method, [params[0], { blockHash }])
         } catch (e) {
-          if (!(e instanceof RpcError) || !UNKNOWN_BLOCK.test(e.message) || attempt >= UNKNOWN_BLOCK_RETRIES) throw e
+          if (!(e instanceof RpcError) || reverted(e) || !UNKNOWN_BLOCK.test(e.message) || attempt >= UNKNOWN_BLOCK_RETRIES) throw e
           await new Promise((resolve) => setTimeout(resolve, delayMs))
         }
       }
@@ -189,8 +201,10 @@ export function createVestingReader(
       const held = await rpc.call<unknown>('eth_getBlockByHash', [hash, false])
       if (!held) throw new Error(`The node does not hold block ${hash}, which created ${vesting}`)
       // Holding the block now does not prove the failure was the contract's: the failed call may have
-      // reached another backend, or this one before it caught up. The read is made once more, and the
-      // contract left out only if it fails again in a way that is not the node's.
+      // reached another backend, or this one before it caught up. The read is made once more, after
+      // a while for a node that lags, and the contract left out only if it fails again in a way that
+      // is not the node's.
+      await new Promise((resolve) => setTimeout(resolve, unknownBlockDelayMs))
       try {
         return await readAt(vesting, height, hash)
       } catch (e) {

@@ -4,7 +4,9 @@ import * as v1Abi from '../abi/TokenVesting'
 import * as v2Abi from '../abi/PeriodicTokenVesting'
 import { RpcConnectionError, RpcError } from '@subsquid/rpc-client'
 import { VESTING_NETWORKS } from './config'
-import { createVestingReader, deterministic, reverted } from './reader'
+import { createServer } from 'node:http'
+import { AddressInfo } from 'node:net'
+import { createVestingReader, deterministic, reverted, VestingRpcClient } from './reader'
 
 const network = VESTING_NETWORKS['ethereum-mainnet']
 const VESTING = '0x02d2c06c1b0e1c2a6f9e4d6e8f1a2b3c4d5e6f70'
@@ -72,7 +74,7 @@ test('a version 1 contract is read with its hardcoded total, whole tokens, and a
     ...v1Answers,
     [v1Abi.functions.duration.selector]: encodeUint(31536000n),
   })
-  const fields = await createVestingReader(network, rpc).read(vesting, BLOCK)
+  const fields = await createVestingReader(network, rpc, 0).read(vesting, BLOCK)
   assert.deepEqual(fields, {
     version: 1,
     token: TOKEN,
@@ -114,7 +116,7 @@ test('a version 2 contract, which reverts duration(), is read with an absolute c
     [v2Abi.functions.getStop.selector]: encodeUint(0n),
     [v2Abi.functions.getIsLinear.selector]: encodeBool(false),
   })
-  const fields = await createVestingReader(network, rpc).read(VESTING, BLOCK)
+  const fields = await createVestingReader(network, rpc, 0).read(VESTING, BLOCK)
   assert.equal(fields?.version, 2)
   assert.equal(fields?.cliff, 1700000100n)
   assert.equal(fields?.duration, 2592000n * 2n)
@@ -125,28 +127,28 @@ test('a version 2 contract, which reverts duration(), is read with an absolute c
 })
 
 test('a contract with no code, or whose getters all revert, is not a vesting', async () => {
-  assert.equal(await createVestingReader(network, fakeRpc({}).rpc).read(VESTING, BLOCK), undefined)
+  assert.equal(await createVestingReader(network, fakeRpc({}).rpc, 0).read(VESTING, BLOCK), undefined)
   const reverting = Object.fromEntries(
     [...Object.values(v1Abi.functions), ...Object.values(v2Abi.functions)].map((f) => [f.selector, revert()])
   )
-  assert.equal(await createVestingReader(network, fakeRpc(reverting).rpc).read(VESTING, BLOCK), undefined)
+  assert.equal(await createVestingReader(network, fakeRpc(reverting).rpc, 0).read(VESTING, BLOCK), undefined)
 })
 
 test('a clone whose implementation fails in a way other than a revert is not a vesting either', async () => {
   for (const message of ['out of gas', 'invalid opcode: INVALID', 'stack underflow (0 <=> 1)', 'invalid jump destination']) {
     const { rpc } = fakeRpc({ [v1Abi.functions.duration.selector]: new RpcError({ code: -32000, message }) })
-    assert.equal(await createVestingReader(network, rpc).read(VESTING, BLOCK), undefined, message)
+    assert.equal(await createVestingReader(network, rpc, 0).read(VESTING, BLOCK), undefined, message)
   }
 })
 
 test('an empty answer from a node that does not hold the block that created the clone fails the read, to be made again', async () => {
-  await assert.rejects(createVestingReader(network, fakeRpc({}, false).rpc).read(VESTING, BLOCK), /does not hold block/)
+  await assert.rejects(createVestingReader(network, fakeRpc({}, false).rpc, 0).read(VESTING, BLOCK), /does not hold block/)
 })
 
 test('a clone with no code at a block the node holds, destroyed by its initializer in the transaction that created it, is not a vesting', async () => {
   // Every call to a contract with no code answers nothing: the block is checked, and the read made twice.
   const { rpc, blocks, asked } = fakeRpc({})
-  assert.equal(await createVestingReader(network, rpc).read(VESTING, BLOCK), undefined)
+  assert.equal(await createVestingReader(network, rpc, 0).read(VESTING, BLOCK), undefined)
   assert.equal(asked.block, 1)
   assert.equal(blocks.length, 2)
 })
@@ -157,10 +159,53 @@ test('a vesting whose first read fails as a call would, from a node error worded
       ...v1Answers,
       [v1Abi.functions.duration.selector]: [new RpcError({ code: -32000, message }), encodeUint(31536000n)],
     })
-    const fields = await createVestingReader(network, rpc).read(VESTING, BLOCK)
+    const fields = await createVestingReader(network, rpc, 0).read(VESTING, BLOCK)
     assert.equal(fields?.version, 1, message)
     assert.equal(fields?.duration, 31536000n, message)
     assert.equal(asked.block, 1, message)
+  }
+})
+
+test('a vesting whose first read answers nothing, from a backend that lags, is read again and kept', async () => {
+  // `0x` does not decode: it reads as the contract's failure, until the second read.
+  const { rpc, blocks } = fakeRpc({ ...v1Answers, [v1Abi.functions.duration.selector]: ['', encodeUint(31536000n)] })
+  const fields = await createVestingReader(network, rpc, 0).read(VESTING, BLOCK)
+  assert.equal(fields?.version, 1)
+  assert.ok(blocks.length > 2)
+})
+
+test('a revert whose reason reads as a node failure is the contract\'s, and is not asked again', async () => {
+  for (const message of ['execution reverted: rate limit', 'execution reverted: block 0x1 not found', 'execution reverted: no backend']) {
+    const { rpc, blocks } = fakeRpc({ [v1Abi.functions.duration.selector]: new RpcError({ code: 3, message }) })
+    // v2 getters answer nothing: not a vesting either way. One duration() call per read, two reads.
+    assert.equal(await createVestingReader(network, rpc, 0).read(VESTING, BLOCK), undefined, message)
+    assert.ok(blocks.length <= 2 * 15, message)
+  }
+})
+
+test('the RPC client never retries a revert, whatever its reason says', async () => {
+  let calls = 0
+  const server = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (chunk) => (raw += chunk))
+    req.on('end', () => {
+      const { id, method } = JSON.parse(raw) as { id: number; method: string }
+      res.setHeader('content-type', 'application/json')
+      if (method === 'eth_getBlockByHash') return res.end(JSON.stringify({ jsonrpc: '2.0', id, result: { hash: BLOCK.hash } }))
+      calls++
+      res.end(JSON.stringify({ jsonrpc: '2.0', id, error: { code: 3, message: 'execution reverted: rate limit' } }))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const rpc = new VestingRpcClient({ url, retryAttempts: Number.MAX_SAFE_INTEGER, retrySchedule: [10] })
+    assert.equal(await createVestingReader(network, rpc, 0).read(VESTING, BLOCK), undefined)
+    // duration(), then the 14 v2 getters, twice: each call made once.
+    assert.ok(calls <= 2 * 15, `${calls} calls`)
+    rpc.close()
+  } finally {
+    server.close()
   }
 })
 
@@ -180,6 +225,8 @@ test('only failures of the call, not of the node, are deterministic', () => {
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'out of gas' })), true)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'invalid opcode: INVALID' })), true)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'execution aborted (timeout = 5s)' })), true)
+  assert.equal(deterministic(new RpcError({ code: 3, message: 'execution reverted: rate limit' })), true)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'execution reverted: upstream backend busy' })), true)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'header not found' })), false)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'header for hash not found' })), false)
   assert.equal(deterministic(new RpcError({ code: -32000, message: `block ${BLOCK.hash} not found` })), false)
@@ -196,7 +243,7 @@ test('only failures of the call, not of the node, are deterministic', () => {
 
 test('a failure that may pass on a retry fails the read', async () => {
   const { rpc } = fakeRpc({ [v1Abi.functions.duration.selector]: new RpcConnectionError('socket hang up') })
-  await assert.rejects(createVestingReader(network, rpc).read(VESTING, BLOCK), RpcConnectionError)
+  await assert.rejects(createVestingReader(network, rpc, 0).read(VESTING, BLOCK), RpcConnectionError)
 })
 
 test('a node that does not have the block yet is asked again', async () => {
