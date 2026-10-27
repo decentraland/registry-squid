@@ -28,39 +28,49 @@ const BENEFICIARY = '0x' + 'be'.repeat(20)
 const BLOCK = { height: 15000000, hash: '0x' + 'ab'.repeat(32) }
 
 /**
- * An RPC that answers each function by its selector, and records the block every call is made at. The
- * node holds the block unless `blockHeld` says otherwise.
+ * An RPC that answers each function by its selector, and records the block every call is made at and
+ * how often the block is asked for. The node holds the block unless `blockHeld` says otherwise. An
+ * answer given as a list is used up one item per call, its last item repeated.
  */
-function fakeRpc(answers: Record<string, string | Error>, blockHeld = true) {
+function fakeRpc(answers: Record<string, string | Error | (string | Error)[]>, blockHeld = true) {
   const blocks: unknown[] = []
+  const asked = { block: 0 }
   const rpc = {
     async call(method: string, params?: unknown[]) {
-      if (method === 'eth_getBlockByHash') return blockHeld ? { hash: (params as string[])[0] } : null
+      if (method === 'eth_getBlockByHash') {
+        asked.block++
+        return blockHeld ? { hash: (params as string[])[0] } : null
+      }
       assert.equal(method, 'eth_call')
       const [{ data }, block] = params as [{ data: string }, unknown]
       blocks.push(block)
-      const answer = answers[data.slice(0, 10)]
+      const given = answers[data.slice(0, 10)]
+      const answer = Array.isArray(given) ? (given.length > 1 ? given.shift() : given[0]) : given
       if (answer instanceof Error) throw answer
       return answer === undefined ? '0x' : '0x' + answer
     },
   }
-  return { rpc: rpc as never, blocks }
+  return { rpc: rpc as never, blocks, asked }
 }
 
 const revert = () => new RpcError({ code: 3, message: 'execution reverted' })
 
+const v1Answers = {
+  [v1Abi.functions.token.selector]: encodeAddress(TOKEN),
+  [v1Abi.functions.owner.selector]: encodeAddress(OWNER),
+  [v1Abi.functions.beneficiary.selector]: encodeAddress(BENEFICIARY),
+  [v1Abi.functions.revoked.selector]: encodeBool(false),
+  [v1Abi.functions.revocable.selector]: encodeBool(true),
+  [v1Abi.functions.released.selector]: encodeUint(1500n * ETH + ETH / 2n),
+  [v1Abi.functions.start.selector]: encodeUint(1600000000n),
+  [v1Abi.functions.cliff.selector]: encodeUint(1610000000n),
+}
+
 test('a version 1 contract is read with its hardcoded total, whole tokens, and a linear schedule', async () => {
   const vesting = Object.keys(network.v1Totals)[0]
   const { rpc, blocks } = fakeRpc({
+    ...v1Answers,
     [v1Abi.functions.duration.selector]: encodeUint(31536000n),
-    [v1Abi.functions.token.selector]: encodeAddress(TOKEN),
-    [v1Abi.functions.owner.selector]: encodeAddress(OWNER),
-    [v1Abi.functions.beneficiary.selector]: encodeAddress(BENEFICIARY),
-    [v1Abi.functions.revoked.selector]: encodeBool(false),
-    [v1Abi.functions.revocable.selector]: encodeBool(true),
-    [v1Abi.functions.released.selector]: encodeUint(1500n * ETH + ETH / 2n),
-    [v1Abi.functions.start.selector]: encodeUint(1600000000n),
-    [v1Abi.functions.cliff.selector]: encodeUint(1610000000n),
   })
   const fields = await createVestingReader(network, rpc).read(vesting, BLOCK)
   assert.deepEqual(fields, {
@@ -134,8 +144,35 @@ test('an empty answer from a node that does not hold the block that created the 
 })
 
 test('a clone with no code at a block the node holds, destroyed by its initializer in the transaction that created it, is not a vesting', async () => {
-  // Every call to a contract with no code answers nothing.
-  assert.equal(await createVestingReader(network, fakeRpc({}).rpc).read(VESTING, BLOCK), undefined)
+  // Every call to a contract with no code answers nothing: the block is checked, and the read made twice.
+  const { rpc, blocks, asked } = fakeRpc({})
+  assert.equal(await createVestingReader(network, rpc).read(VESTING, BLOCK), undefined)
+  assert.equal(asked.block, 1)
+  assert.equal(blocks.length, 2)
+})
+
+test('a vesting whose first read fails as a call would, from a node error worded as no pattern expects, is read again and kept', async () => {
+  for (const message of ['execution aborted (timeout = 5s)', 'something the node never said before']) {
+    const { rpc, asked } = fakeRpc({
+      ...v1Answers,
+      [v1Abi.functions.duration.selector]: [new RpcError({ code: -32000, message }), encodeUint(31536000n)],
+    })
+    const fields = await createVestingReader(network, rpc).read(VESTING, BLOCK)
+    assert.equal(fields?.version, 1, message)
+    assert.equal(fields?.duration, 31536000n, message)
+    assert.equal(asked.block, 1, message)
+  }
+})
+
+test('a node that lacks the block, worded as geth and erigon word it, never makes a vesting disappear', async () => {
+  for (const message of [`header for hash not found`, `block ${BLOCK.hash} not found`]) {
+    const { rpc } = fakeRpc({
+      ...v1Answers,
+      [v1Abi.functions.duration.selector]: [new RpcError({ code: -32000, message }), encodeUint(31536000n)],
+    })
+    const fields = await createVestingReader(network, rpc, 0).read(VESTING, BLOCK)
+    assert.equal(fields?.version, 1, message)
+  }
 })
 
 test('only failures of the call, not of the node, are deterministic', () => {
@@ -144,6 +181,11 @@ test('only failures of the call, not of the node, are deterministic', () => {
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'invalid opcode: INVALID' })), true)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'execution aborted (timeout = 5s)' })), true)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'header not found' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'header for hash not found' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: `block ${BLOCK.hash} not found` })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'quota exceeded' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'upstream error' })), false)
+  assert.equal(deterministic(new RpcError({ code: -32000, message: 'no backend is currently healthy' })), false)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'missing trie node 0xab (path )' })), false)
   assert.equal(deterministic(new RpcError({ code: -32000, message: 'request timed out' })), false)
   assert.equal(deterministic(new RpcError({ code: -32005, message: 'limit exceeded' })), false)
