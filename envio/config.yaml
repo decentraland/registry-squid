@@ -1,0 +1,100 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: registry-envio
+description: >-
+  Decentraland LAND permissions, rentals and vesting contracts on Ethereum, and the
+  third-party (linked wearables) registry on Polygon. A HyperIndex port of registry-squid.
+# Each entity is written by one chain only, so ids keep the squid's (and subgraphs') formats
+# with no chain prefix: rows are keyed by (id, chainId).
+disable_default_cross_chain: true
+# The squid lowercases every address it stores; so does this.
+address_format: lowercase
+
+contracts:
+  - name: LANDRegistry
+    events:
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed assetId)
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed assetId, address operator, bytes userData)
+        name: TransferWithUserData
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed assetId, address operator, bytes userData, bytes operatorData)
+        name: TransferWithOperatorData
+      - event: Approval(address indexed owner, address indexed operator, uint256 indexed assetId)
+      - event: UpdateOperator(uint256 indexed assetId, address indexed operator)
+      - event: UpdateManager(address indexed _owner, address indexed _operator, address indexed _caller, bool _approved)
+      - event: ApprovalForAll(address indexed holder, address indexed operator, bool authorized)
+      - event: Update(uint256 indexed assetId, address indexed holder, address indexed operator, string data)
+
+  - name: EstateRegistry
+    events:
+      - event: Transfer(address indexed _from, address indexed _to, uint256 indexed _tokenId)
+      - event: Approval(address indexed _owner, address indexed _approved, uint256 indexed _tokenId)
+      - event: UpdateOperator(uint256 indexed _estateId, address indexed _operator)
+      - event: UpdateManager(address indexed _owner, address indexed _operator, address indexed _caller, bool _approved)
+      - event: ApprovalForAll(address indexed _owner, address indexed _operator, bool _approved)
+      - event: Update(uint256 indexed _assetId, address indexed _holder, address indexed _operator, string _data)
+      - event: CreateEstate(address indexed _owner, uint256 indexed _estateId, string _data)
+      - event: AddLand(uint256 indexed _estateId, uint256 indexed _landId)
+      - event: RemoveLand(uint256 indexed _estateId, uint256 indexed _landId, address indexed _destinatary)
+
+  - name: Rentals
+    events:
+      - event: AssetRented(address indexed _contractAddress, uint256 indexed _tokenId, address _lessor, address _tenant, address _operator, uint256 _rentalDays, uint256 _pricePerDay, bool _isExtension, address _sender, bytes _signature)
+      - event: AssetClaimed(address indexed _contractAddress, uint256 indexed _tokenId, address _sender)
+      - event: ContractIndexUpdated(uint256 _newIndex, address _sender)
+      - event: SignerIndexUpdated(address indexed _signer, uint256 _newIndex, address _sender)
+      - event: AssetIndexUpdated(address indexed _signer, address indexed _contractAddress, uint256 indexed _tokenId, uint256 _newIndex, address _sender)
+      - event: FeeUpdated(uint256 _from, uint256 _to, address _sender)
+
+  - name: VestingFactory
+    events:
+      - event: VestingCreated(address indexed _address, bytes32 _salt)
+
+  # Every TokenVesting (version 1) and PeriodicTokenVesting (version 2) the factory creates,
+  # registered from VestingCreated. The two versions' events share one contract definition.
+  - name: Vesting
+    events:
+      - event: Released(uint256 amount)
+        name: ReleasedV1
+      - event: Released(address indexed _receiver, uint256 _amount)
+        name: ReleasedV2
+      - event: Paused(address account)
+      - event: Unpaused(address account)
+      - event: Revoked()
+
+  - name: ThirdPartyRegistry
+    events:
+      - event: ThirdPartyAdded(string _thirdPartyId, string _metadata, string _resolver, bool _isApproved, address[] _managers, uint256 _itemSlots, bool _isProgrammatic, address _sender)
+      - event: ThirdPartyAdded(string _thirdPartyId, string _metadata, string _resolver, bool _isApproved, address[] _managers, uint256 _itemSlots, address _sender)
+        name: ThirdPartyAddedLegacy
+      - event: ThirdPartyUpdated(string _thirdPartyId, string _metadata, string _resolver, address[] _managers, bool[] _managerValues, uint256 _itemSlots, address _sender)
+      - event: ThirdPartyItemSlotsBought(string _thirdPartyId, uint256 _price, uint256 _value, address _sender)
+      - event: ThirdPartyReviewedWithRoot(string _thirdPartyId, bytes32 _root, bool _isApproved, address _sender)
+      - event: ThirdPartyReviewed(string _thirdPartyId, bool _value, address _sender)
+      - event: ItemSlotsConsumed(string _thirdPartyId, uint256 _qty, address indexed _signer, bytes32 _messageHash, address indexed _sender)
+      - event: ThirdPartyAggregatorSet(address indexed _oldThirdPartyAggregator, address indexed _newThirdPartyAggregator)
+
+chains:
+  - id: 1 # Ethereum mainnet
+    start_block: 4944642
+    contracts:
+      - name: LANDRegistry
+        address: 0xf87e31492faf9a91b02ee0deaad50d51d56d5d4d
+        start_block: 4944642
+      - name: EstateRegistry
+        address: 0x959e104e1a4db6317fa58f8295f586e1a978c297
+        start_block: 6236547
+      - name: Rentals
+        address: 0x3a1469499d0be105d4f77045ca403a5f6dc2f3f5
+        start_block: 16070889
+      # Where the vestings subgraph starts reading the factory, not where it was deployed
+      # (10,772,475): the 131 vestings created before it are not shown, as on the subgraph.
+      - name: VestingFactory
+        address: 0xe357273545c152f07afe2c38257b7b653fd3f6d0
+        start_block: 12732617
+      - name: Vesting
+
+  - id: 137 # Polygon PoS
+    start_block: 26860700
+    contracts:
+      - name: ThirdPartyRegistry
+        address: 0x1c436c1efb4608dffdc8bace99d2b03c314f3348
+        start_block: 26860700

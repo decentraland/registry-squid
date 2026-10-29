@@ -1,0 +1,409 @@
+# The squid's entities (../schema/*.graphql), with the same names, fields and id formats.
+# Differences, all forced by HyperIndex's schema rules, are marked "HyperIndex:" below.
+# HyperIndex has no @entity directive: every type here is an entity.
+
+# ---------------------------------------------------------------------------------------------
+# LAND permissions: LANDRegistry and EstateRegistry on Ethereum (../schema/land.graphql)
+#
+# Id formats:
+#   Parcel          minimal hex of the token id: "0x1", "0xffff...fff6"
+#   Estate, Data    decimal token id for estates; the parcel's hex id for parcel data
+#   Wallet          lowercase address
+#   Authorization,
+#   Owner, Operator,
+#   UpdateOperator  "<block>-<logIndex>-<Type>"
+#   EstateHistory   "<block>-<logIndex>-<AddLand|RemoveLand>-<estateId>"
+# ---------------------------------------------------------------------------------------------
+
+type Parcel @index(fields: ["x", "y"]) {
+  id: ID!
+  tokenId: BigInt! @index
+  x: BigInt!
+  y: BigInt!
+  owner: Wallet
+  owners: [Owner!]! @derivedFrom(field: "parcel")
+  operators: [Operator!]! @derivedFrom(field: "parcel")
+  operator: Bytes
+  updateOperator: Bytes @index
+  updateOperators: [UpdateOperator!]! @derivedFrom(field: "parcel")
+  estate: Estate
+  estates: [EstateHistory!]! @derivedFrom(field: "parcel")
+  # HyperIndex: no @unique directive; one Data row per parcel by construction (same id).
+  data: Data
+  updatedAt: BigInt
+}
+
+type Estate {
+  id: ID!
+  owner: Wallet!
+  owners: [Owner!]! @derivedFrom(field: "estate")
+  operators: [Operator!]! @derivedFrom(field: "estate")
+  operator: Bytes
+  updateOperator: Bytes @index
+  updateOperators: [UpdateOperator!]! @derivedFrom(field: "estate")
+  size: Int
+  parcels: [Parcel!]! @derivedFrom(field: "estate")
+  data: Data
+  createdAt: BigInt
+  updatedAt: BigInt
+}
+
+type EstateHistory {
+  id: ID!
+  prevEstateId: String
+  estateId: String @index
+  parcel: Parcel!
+  createdAt: BigInt!
+  estateTokenId: String! @index
+  eventName: String!
+  blockNumber: Int! @index
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type Authorization @index(fields: ["owner", "type"]) {
+  id: ID!
+  type: String!
+  tokenAddress: Bytes!
+  owner: Wallet!
+  operator: Bytes! @index
+  isApproved: Boolean!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+# The latest UpdateManager / ApprovalForAll per (tokenAddress, owner, operator, type).
+type AuthorizationState @index(fields: ["owner", "type"]) {
+  # "<tokenAddress>-<owner>-<operator>-<type>"
+  id: ID!
+  type: String!
+  tokenAddress: Bytes!
+  owner: Wallet!
+  operator: Bytes! @index
+  isApproved: Boolean!
+  timestamp: BigInt!
+  blockNumber: Int!
+  logIndex: Int!
+}
+
+type Owner {
+  id: ID!
+  address: Bytes
+  parcel: Parcel
+  estate: Estate
+  eventName: String!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type Operator {
+  id: ID!
+  address: Bytes
+  parcel: Parcel
+  estate: Estate
+  eventName: String!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type UpdateOperator {
+  id: ID!
+  address: Bytes
+  parcel: Parcel
+  estate: Estate
+  eventName: String!
+  timestamp: BigInt!
+  createdAt: BigInt!
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type Data {
+  id: ID!
+  # HyperIndex: @derivedFrom only yields lists, so these one-to-one back-references are stored,
+  # as the LAND subgraph stores them. They read the same: the parcel or estate holding this data.
+  parcel: Parcel
+  estate: Estate
+  version: String!
+  name: String
+  description: String
+  ipns: String
+}
+
+type Wallet {
+  id: ID!
+  address: Bytes!
+  parcels: [Parcel!]! @derivedFrom(field: "owner")
+  estates: [Estate!]! @derivedFrom(field: "owner")
+}
+
+# ---------------------------------------------------------------------------------------------
+# Rentals: the Rentals contract on Ethereum (../schema/rentals.graphql)
+#
+# Id formats:
+#   Rental                 "<contractAddress>:<tokenId>:<rentalIndex>"
+#   RentalAsset            "<contractAddress>-<tokenId>"
+#   IndexesUpdate*History  a global counter, as a decimal string
+#   AnalyticsDayData       the UTC day number (timestamp / 86400)
+# ---------------------------------------------------------------------------------------------
+
+type Rental {
+  id: ID!
+  contractAddress: String! @index
+  tokenId: BigInt! @index
+  lessor: String! @index
+  tenant: String! @index
+  operator: String!
+  rentalDays: BigInt!
+  startedAt: BigInt! @index
+  endsAt: BigInt! @index
+  updatedAt: BigInt! @index
+  pricePerDay: BigInt!
+  sender: String!
+  ownerHasClaimedAsset: Boolean!
+  claimedAt: BigInt
+  isExtension: Boolean!
+  isActive: Boolean! @index
+  # No btree index, for the reason given in ../schema/rentals.graphql.
+  signature: String!
+  rentalContractAddress: String!
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type RentalsCount {
+  id: ID!
+  value: BigInt!
+}
+
+enum IndexUpdateType {
+  CONTRACT
+  SIGNER
+  ASSET
+}
+
+enum IndexUpdateEventType {
+  RENT
+  CANCEL
+}
+
+type IndexesUpdateHistory {
+  id: ID!
+  type: IndexUpdateType!
+  date: BigInt! @index
+  sender: String!
+  contractUpdate: IndexesUpdateContractHistory
+  singerUpdate: IndexesUpdateSignerHistory
+  assetUpdate: IndexesUpdateAssetHistory
+  blockNumber: Int!
+  logIndex: Int!
+  transactionHash: String!
+}
+
+type IndexesUpdateContractHistory {
+  id: ID!
+  newIndex: BigInt!
+  contractAddress: Bytes!
+}
+
+type IndexesUpdateSignerHistory {
+  id: ID!
+  newIndex: BigInt!
+  signer: String! @index
+}
+
+type IndexesUpdateAssetHistory {
+  id: ID!
+  newIndex: BigInt!
+  signer: String! @index
+  tokenId: BigInt!
+  contractAddress: String!
+  type: IndexUpdateEventType!
+}
+
+type Rentable {
+  id: ID!
+}
+
+type RentalAsset {
+  id: ID!
+  contractAddress: Bytes!
+  tokenId: BigInt!
+  lessor: Bytes @index
+  isClaimed: Boolean!
+  claimedAt: BigInt
+}
+
+type RentalsContract {
+  id: ID!
+  fee: BigInt!
+}
+
+type AnalyticsTotalData {
+  id: ID!
+  rentals: Int!
+  volume: BigInt!
+  lessorEarnings: BigInt!
+  feeCollectorEarnings: BigInt!
+}
+
+type AnalyticsDayData {
+  id: ID!
+  date: Int!
+  rentals: Int!
+  volume: BigInt!
+  lessorEarnings: BigInt!
+  feeCollectorEarnings: BigInt!
+}
+
+# ---------------------------------------------------------------------------------------------
+# Third-party registry: ThirdPartyRegistry on Polygon (../schema/third-party.graphql)
+# ---------------------------------------------------------------------------------------------
+
+type ThirdParty {
+  # The third party's URN.
+  id: ID!
+  managers: [String!]!
+  rawMetadata: String!
+  resolver: String
+  isApproved: Boolean @index
+  maxItems: BigInt!
+  metadata: Metadata!
+  root: String!
+  consumedSlots: BigInt!
+  isProgrammatic: Boolean!
+  searchName: String
+  searchDescription: String
+  searchText: String
+  rootHistory: [ThirdPartyRootHistory!]! @derivedFrom(field: "thirdParty")
+}
+
+# One row per ThirdPartyReviewedWithRoot / ThirdPartyReviewed. Id: "<block>-<logIndex>".
+type ThirdPartyRootHistory @index(fields: ["thirdParty", "blockNumber"]) {
+  id: ID!
+  thirdParty: ThirdParty!
+  root: String!
+  isApproved: Boolean!
+  eventName: String!
+  blockNumber: Int!
+  logIndex: Int!
+  timestamp: BigInt!
+  transactionHash: String!
+}
+
+type Curation {
+  # The curator's address.
+  id: ID!
+  qty: BigInt!
+  receipts: [Receipt!]! @derivedFrom(field: "curation")
+}
+
+type Receipt {
+  # The message hash.
+  id: ID!
+  thirdParty: ThirdParty!
+  curation: Curation!
+  qty: BigInt!
+  signer: String!
+  createdAt: BigInt!
+}
+
+enum MetadataType {
+  undefined
+  third_party_v1
+}
+
+type Metadata {
+  id: ID!
+  type: MetadataType!
+  thirdParty: ThirdPartyMetadata
+}
+
+type LinkedContracts {
+  # "<network>-<address>", lowercase.
+  id: ID!
+  network: String!
+  address: String!
+}
+
+type RegistryData {
+  id: ID!
+  aggregatorAddress: String!
+}
+
+type ThirdPartyMetadata {
+  id: ID!
+  name: String!
+  description: String!
+  # HyperIndex: no embedded object types, so the squid's inline [LinkedContract!] list is a JSON
+  # array of the same { id, network, address } objects, sorted by id. GraphQL clients read it as
+  # `contracts` (a JSON value) instead of `contracts { id network address }`.
+  contracts: Json
+}
+
+type ThirdPartyCount {
+  id: ID!
+  thirdPartyTotal: BigInt!
+  receiptTotal: BigInt!
+  curationTotal: BigInt!
+}
+
+# ---------------------------------------------------------------------------------------------
+# Vestings: the vesting factory's contracts on Ethereum (../schema/vesting.graphql)
+#
+# Values follow the vestings subgraph, oddities included (see ../schema/vesting.graphql).
+# Id formats:
+#   Vesting     the contract's address
+#   ReleaseLog  "<vesting>-<timestamp>"
+#   PausedLog   "<vesting>-<timestamp>-<Paused|Unpaused>"
+# ---------------------------------------------------------------------------------------------
+
+type Vesting {
+  id: ID!
+  version: Int!
+  duration: BigInt!
+  cliff: BigInt!
+  beneficiary: Bytes!
+  revoked: Boolean!
+  revocable: Boolean!
+  released: BigInt!
+  start: BigInt!
+  periodDuration: BigInt!
+  # A list of decimal strings, as the squid stores it.
+  vestedPerPeriod: [String!]!
+  paused: Boolean!
+  pausable: Boolean!
+  stop: BigInt!
+  linear: Boolean!
+  token: Bytes!
+  owner: Bytes!
+  total: BigInt!
+  releaseLogs: [ReleaseLog!]! @derivedFrom(field: "vesting")
+  pausedLogs: [PausedLog!]! @derivedFrom(field: "vesting")
+  revokeTimestamp: BigInt
+}
+
+type ReleaseLog {
+  id: ID!
+  timestamp: BigInt!
+  amount: BigInt!
+  vesting: Vesting!
+}
+
+type PausedLog {
+  id: ID!
+  timestamp: BigInt!
+  eventType: String!
+  vesting: Vesting!
+}
