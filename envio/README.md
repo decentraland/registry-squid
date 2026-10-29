@@ -84,7 +84,16 @@ Services that read Postgres directly would need the `v1_*` views recreated over 
 Full backfill from each contract's first block to chain head on one machine (Apple Silicon laptop,
 Postgres 17 in Docker), 29 October 2026.
 
-| | HyperIndex (HyperSync) | Squid (public SQD portal, no API key) |
+The project targets envio 3.15.0. The benchmark and correctness results below were measured on
+envio 3.14.0, the version current when the work was done. After upgrading, a full backfill from an
+empty database on 3.15.0 took **4 min 43 s** to index both chains to head (529,912 Ethereum
+events). It produced the same rows as the 3.14.0 run: Ethereum tables were identical, and Polygon
+differed only by one registry event that landed after the 3.14.0 run had stopped. That run's
+Polygon and rentals data also matched the subgraphs at its own head. The machine was under heavy
+load from other workloads during the 3.15.0 run, so its time is not a like-for-like comparison
+with the 3.14.0 runs.
+
+| | HyperIndex 3.14.0 (HyperSync) | Squid (public SQD portal, no API key) |
 | --- | --- | --- |
 | Ethereum: LAND, estates, rentals, vestings (blocks 4,944,642 → 26,298,953, 529,912 events) | **3 min 22 s** (measured; 5 min 24 s on a second run sharing the machine with the squid) | ~11 h for LAND/rentals, ~20 h for vestings (**extrapolated** from a 90-minute run) |
 | Polygon: third-party registry (blocks 26,860,700 → 96,385,483, 252 events) | under 35 s (measured, sampled), in the same run | ~40 h (**extrapolated**) |
@@ -105,7 +114,7 @@ How it was measured:
 
 ## Correctness
 
-At the indexed head (Ethereum block 26,298,953, Polygon block 96,385,483), every row of every
+Measured on envio 3.14.0. At the indexed head (Ethereum block 26,298,953, Polygon block 96,385,483), every row of every
 entity the squid's `src/tools/compare.ts` checks, plus `Wallet`, was compared with Decentraland's
 live subgraphs (`land-manager`, `rentals-ethereum-mainnet`, `tpr-matic-mainnet`) using
 `block: { number }` queries: 1,236,528 rows across 24 entities, **0 differences, none missing,
