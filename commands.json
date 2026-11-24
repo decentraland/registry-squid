@@ -52,12 +52,12 @@
     },
     "serve": {
       "description": "Start the GraphQL API with The Graph's query dialect",
-      "cmd": ["node", "--require=./lib/api/pool-errors.js", "node_modules/@subsquid/graphql-server/bin/run.js", "--dialect", "thegraph"]
+      "cmd": ["node", "lib/api/serve.js", "--dialect", "thegraph"]
     },
     "serve:prod": {
       "hidden": true,
       "cmd": [
-        "node", "--require=./lib/api/pool-errors.js", "node_modules/@subsquid/graphql-server/bin/run.js",
+        "node", "lib/api/serve.js",
         "--dumb-cache", "in-memory",
         "--dumb-cache-ttl", "2000",
         "--dumb-cache-size", "100",

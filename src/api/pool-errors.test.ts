@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import './pool-errors'
 
 const pg = require('pg')
@@ -8,6 +9,15 @@ const terminated = () => Object.assign(new Error('terminating connection due to 
 test('a pool created after the preload outlives an error on an idle connection', async () => {
   const pool = new pg.Pool()
   assert.doesNotThrow(() => pool.emit('error', terminated()))
+  await pool.end()
+})
+
+test('a connection the pool opens outlives an error while it runs a query', async () => {
+  const pool = new pg.Pool()
+  const client = new EventEmitter()
+  pool.emit('connect', client)
+  assert.equal(client.listenerCount('error'), 1)
+  assert.doesNotThrow(() => client.emit('error', terminated()))
   await pool.end()
 })
 

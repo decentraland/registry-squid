@@ -138,10 +138,11 @@ same snapshot, as they do on a subgraph. The server's default, `SERIALIZABLE`, a
 read-only request over tables the processors write a whole batch at a time, and Postgres refuses it
 on a read replica (a hot standby), which the API reads from in production.
 
-It keeps running when the database ends one of its idle connections, as an engine upgrade, a restart
-or a failover does. `@subsquid/graphql-server` creates its connection pool without an `error`
-listener, so such an error ends the process. `lib/api/pool-errors.js`, loaded before the server,
-gives every pool one: the pool drops the dead connection and opens another for the next query.
+It keeps running when the database ends one of its connections, idle or running a query, as an engine
+upgrade, a restart or a failover does. `@subsquid/graphql-server` creates its connection pool without
+an `error` listener, so such an error ends the process. `lib/api/serve.js` starts the server with a
+listener on every pool and every connection it opens: a query that was running gets the error, and the
+pool discards the broken connection and opens another for the next query.
 
 It sets no `--max-response-size`: that limit is checked against an estimate that multiplies
 the `first` of every nested list, and the Builder's land query nests lists of 1000 three levels deep
