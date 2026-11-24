@@ -17,7 +17,7 @@
     "processor:ethereum": "node lib/ethereum/main.js",
     "processor:polygon": "node lib/polygon/main.js",
     "processor:vesting": "node lib/vesting/main.js",
-    "serve": "squid-graphql-server --dialect thegraph",
+    "serve": "node --require=./lib/api/pool-errors.js node_modules/@subsquid/graphql-server/bin/run.js --dialect thegraph",
     "vestings:snapshot": "npm run build && node lib/tools/vestings-snapshot.js"
   },
   "dependencies": {
